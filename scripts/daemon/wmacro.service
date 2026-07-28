@@ -1,0 +1,19 @@
+[Unit]
+Description=WMacro input daemon
+ConditionVirtualization=!container
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+User=wmacro
+Group=wmacro
+# This automatically creates /run/wmacro/ owned by wmacro:wmacro
+RuntimeDirectory=wmacro
+# Ensure the group has read/write/execute access to the folder
+RuntimeDirectoryMode=0770
+ExecStart=/usr/bin/wmacro-daemon
+Restart=on-failure
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,61 @@
+# Compiled artifacts
+/target/
+
+# Cargo lock
+# Keep Cargo.lock for applications.
+# Uncomment the next line only if this is a library.
+#! Cargo.lock
+
+# Backup files
+**/*.rs.bk
+*.bak
+*.orig
+*.rej
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Linux
+.directory
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.*
+
+# Temporary files
+tmp/
+temp/
+
+# Coverage reports
+coverage/
+*.profraw
+*.profdata
+
+# Rust analyzer
+.rustc_info.json
+
+# makepkg output
+*.pkg.tar.zst
+*.pkg.tar.zst.sig
+*.pkg.tar.xz
+*.pkg.tar.gz
+src/
+pkg/
+
+# core dumps
+core
+core.*
