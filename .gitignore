@@ -53,7 +53,6 @@ coverage/
 *.pkg.tar.zst.sig
 *.pkg.tar.xz
 *.pkg.tar.gz
-src/
 pkg/
 
 # core dumps
