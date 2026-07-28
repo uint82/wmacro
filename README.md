@@ -2,7 +2,7 @@
 
 
 <p align="center">
-    <img src="assets/icon/wmacro.png" alt="Wmacro logo" />
+    <img src="assets/icon/wmacro.png" alt="Wmacro logo" width="200" />
 </p>
 
 
