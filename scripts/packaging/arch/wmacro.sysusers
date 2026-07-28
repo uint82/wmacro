@@ -1,0 +1,6 @@
+g wmacro -
+g input -
+g uinput -
+u wmacro - "WMacro Daemon User" /usr/bin/nologin
+m wmacro input
+m wmacro uinput

@@ -1,0 +1,3 @@
+SUBSYSTEM=="misc", KERNEL=="uinput", GROUP:="input", MODE:="0660", OPTIONS+="static_node=uinput"
+
+ACTION=="add|change", KERNEL=="event*", ATTRS{name}=="WMacro Virtual Input Device", ENV{LIBINPUT_ATTR_POINTER_ACCEL}="0"
