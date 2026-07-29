@@ -1,4 +1,4 @@
-use core_types::{ClickButton, ClickType};
+use wmacro_core_types::{ClickButton, ClickType};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::io::AsRawFd;

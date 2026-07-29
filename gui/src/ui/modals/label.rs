@@ -1,6 +1,6 @@
 use crate::state::SharedState;
 use crate::ui::theme::ThemePalette;
-use core_types::{MacroCommand, MacroCommand::Label};
+use wmacro_core_types::{MacroCommand, MacroCommand::Label};
 use eframe::egui;
 
 pub fn render(
@@ -37,17 +37,17 @@ fn validate_label_name(name: &str, state: &SharedState, edit_idx: &Option<usize>
 
     if name_trimmed.is_empty() {
         return Some("Label name cannot be empty.");
-    } 
-    
+    }
+
     if name != name_trimmed {
         return Some("Label cannot have leading/trailing whitespace.");
     }
-    
+
     let s = state.lock().unwrap_or_else(|e| {
         log::error!("State mutex poisoned: {e}");
         e.into_inner()
     });
-    
+
     if let Some(m) = s.macro_state.current_macro.as_ref() {
         for (idx, cmd) in m.commands.iter().enumerate() {
             if let Label(existing_name) = cmd {
@@ -57,7 +57,7 @@ fn validate_label_name(name: &str, state: &SharedState, edit_idx: &Option<usize>
             }
         }
     }
-    
+
     None
 }
 

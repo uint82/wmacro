@@ -1,4 +1,4 @@
-use core_types::{MacroCommand, MacroEvent, MousePosition, SmartPathOptions};
+use wmacro_core_types::{MacroCommand, MacroEvent, MousePosition, SmartPathOptions};
 use std::f32::consts::PI;
 use std::time::SystemTime;
 

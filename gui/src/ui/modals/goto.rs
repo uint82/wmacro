@@ -1,6 +1,6 @@
 use crate::state::SharedState;
 use crate::ui::theme::ThemePalette;
-use core_types::{MacroCommand, MacroCommand::Label};
+use wmacro_core_types::{MacroCommand, MacroCommand::Label};
 use eframe::egui;
 
 pub fn render(
@@ -49,7 +49,7 @@ fn get_available_labels(state: &SharedState) -> Vec<String> {
         log::error!("State mutex poisoned: {e}");
         e.into_inner()
     });
-    
+
     if let Some(m) = s.macro_state.current_macro.as_ref() {
         for cmd in &m.commands {
             if let Label(name) = cmd {

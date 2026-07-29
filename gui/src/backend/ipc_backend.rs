@@ -3,7 +3,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use core_types::{ClickButton, ClickType, DaemonEvent, DaemonRequest};
+use wmacro_core_types::{ClickButton, ClickType, DaemonEvent, DaemonRequest};
 
 use crate::backend::{keymap, ClickBackend};
 

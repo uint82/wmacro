@@ -11,13 +11,13 @@ mod state;
 mod ui;
 
 pub static GLOBAL_BACKEND: OnceLock<Mutex<Box<dyn backend::ClickBackend + Send>>> = OnceLock::new();
-pub static IPC_EVENT_RX: OnceLock<Mutex<Option<mpsc::Receiver<core_types::DaemonEvent>>>> =
+pub static IPC_EVENT_RX: OnceLock<Mutex<Option<mpsc::Receiver<wmacro_core_types::DaemonEvent>>>> =
     OnceLock::new();
 
 fn main() -> eframe::Result<()> {
     env_logger::init();
 
-    let (event_tx, event_rx) = mpsc::channel::<core_types::DaemonEvent>();
+    let (event_tx, event_rx) = mpsc::channel::<wmacro_core_types::DaemonEvent>();
 
     if IPC_EVENT_RX.set(Mutex::new(Some(event_rx))).is_err() {
         log::warn!("IPC_EVENT_RX already set.");

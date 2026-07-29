@@ -1,6 +1,6 @@
 use crate::state::SharedState;
 use crate::ui::theme::ThemePalette;
-use core_types::MacroCommand;
+use wmacro_core_types::MacroCommand;
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 

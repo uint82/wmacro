@@ -1,4 +1,4 @@
-use core_types::{DaemonEvent, HardwareEvent, HotkeyEvent};
+use wmacro_core_types::{DaemonEvent, HardwareEvent, HotkeyEvent};
 use std::sync::mpsc::{Receiver, Sender};
 
 pub fn spawn_ipc_bridge(

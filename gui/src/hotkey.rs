@@ -2,7 +2,7 @@ use crate::macro_engine::player::spawn_player;
 use crate::macro_engine::recorder::{start_recording, stop_recording};
 use crate::state::{AppState, RecordHotkeyBehavior, SharedState};
 use crate::ui::settings::save_settings;
-use core_types::{Hotkey, HotkeyEvent, Modifiers};
+use wmacro_core_types::{Hotkey, HotkeyEvent, Modifiers};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
 use std::sync::MutexGuard;
