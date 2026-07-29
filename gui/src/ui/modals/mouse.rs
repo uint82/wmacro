@@ -1,7 +1,7 @@
 use super::MouseActionType;
 use crate::state::SharedState;
 use crate::ui::theme::ThemePalette;
-use core_types::{MacroButton, MacroCommand, MacroEvent, MousePosition};
+use wmacro_core_types::{MacroButton, MacroCommand, MacroEvent, MousePosition};
 use eframe::egui;
 
 pub fn render(
@@ -55,7 +55,7 @@ fn render_grid(
                 render_scroll_inputs(ui, palette, scroll_dx, scroll_dy);
             } else {
                 render_position_inputs(ui, state, palette, x, y, use_current_pos);
-                
+
                 if matches!(
                     *action,
                     MouseActionType::LeftClick
@@ -126,7 +126,7 @@ fn render_position_inputs(
     ui.end_row();
 
     ui.label(egui::RichText::new("Live Cursor").color(palette.text_muted));
-    
+
     let (cx, cy, capture_hk) = {
         let s = state.lock().unwrap_or_else(|e| {
             log::error!("State mutex poisoned: {e}");
@@ -134,7 +134,7 @@ fn render_position_inputs(
         });
         (s.cursor_x, s.cursor_y, s.macro_state.capture_hotkey)
     };
-    
+
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(format!("X: {}  Y: {}", cx, cy))
@@ -235,9 +235,9 @@ fn render_buttons(
             *commit = Some(MacroCommand::Action(ev));
             *close = true;
         }
-        
+
         ui.add_space(8.0);
-        
+
         if ui
             .add(egui::Button::new("Cancel").min_size(egui::vec2(80.0, 28.0)))
             .on_hover_cursor(egui::CursorIcon::PointingHand)

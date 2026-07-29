@@ -9,7 +9,7 @@ use crate::state::SharedState;
 use crate::ui::IdeState;
 use crate::ui::modals::Modal;
 use crate::ui::theme::{ThemePalette, editor_bg_frame};
-use core_types::MacroCommand;
+use wmacro_core_types::MacroCommand;
 use eframe::egui;
 
 use actions::{EditorActions, handle_editor_actions};

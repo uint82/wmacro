@@ -4,7 +4,7 @@ use crate::ui::editor::context_menu::render_context_menu;
 use crate::ui::editor::IdeState;
 use crate::ui::modals::{Modal, modal_from_command};
 use crate::ui::theme::ThemePalette;
-use core_types::MacroCommand;
+use wmacro_core_types::MacroCommand;
 use eframe::egui;
 
 const ROW_HEIGHT: f32 = 36.0;

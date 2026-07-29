@@ -1,4 +1,4 @@
-use core_types::Macro;
+use wmacro_core_types::Macro;
 use std::fs;
 use std::path::{Path, PathBuf};
 

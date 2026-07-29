@@ -788,13 +788,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "core_types"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -820,21 +813,6 @@ name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
-
-[[package]]
-name = "daemon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "core_types",
- "env_logger 0.10.2",
- "evdev",
- "inotify",
- "libc",
- "log",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "defmt"
@@ -1123,19 +1101,6 @@ checksum = "900d271a03799a1ee8d1ca9b19893b48ca674a9284fefcfb85f05e74ed314217"
 dependencies = [
  "log",
  "regex",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
-dependencies = [
- "humantime",
- "is-terminal",
- "log",
- "regex",
- "termcolor",
 ]
 
 [[package]]
@@ -1576,23 +1541,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gui"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "core_types",
- "directories",
- "eframe",
- "egui",
- "egui-phosphor",
- "env_logger 0.11.11",
- "log",
- "rfd",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1647,12 +1595,6 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
-
-[[package]]
-name = "humantime"
-version = "2.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
 
 [[package]]
 name = "icu_collections"
@@ -1801,17 +1743,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c033f80b2c113cdf91ab7a33faa9cbc014726dcad99880c8609af2a370edf37d"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "is-terminal"
-version = "0.4.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
-dependencies = [
- "hermit-abi",
- "libc",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4517,6 +4448,45 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "wmacro-core-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "wmacro-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "evdev",
+ "inotify",
+ "libc",
+ "log",
+ "serde",
+ "serde_json",
+ "wmacro-core-types",
+]
+
+[[package]]
+name = "wmacro-gui"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "directories",
+ "eframe",
+ "egui",
+ "egui-phosphor",
+ "env_logger",
+ "log",
+ "rfd",
+ "serde",
+ "serde_json",
+ "wmacro-core-types",
+]
 
 [[package]]
 name = "writeable"

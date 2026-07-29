@@ -31,7 +31,7 @@ pub struct IdeState {
     pub pending_clear_selection: bool,
     pub show_settings: bool,
     pub settings_tab: SettingsTab,
-    pub clipboard: Vec<core_types::MacroCommand>,
+    pub clipboard: Vec<wmacro_core_types::MacroCommand>,
     pub last_clicked_idx: Option<usize>,
     pub selection_start_pos: Option<egui::Pos2>,
     pub drag_start_selection: std::collections::HashSet<usize>,
@@ -41,7 +41,7 @@ impl IdeState {
     pub fn append_command_after_selection(
         &mut self,
         state: &SharedState,
-        cmd: core_types::MacroCommand,
+        cmd: wmacro_core_types::MacroCommand,
     ) {
         let Ok(mut s) = state.lock() else {
             log::error!("Failed to acquire state lock inside append_command_after_selection");
@@ -51,7 +51,7 @@ impl IdeState {
         let m = s
             .macro_state
             .current_macro
-            .get_or_insert_with(|| core_types::Macro::new("untitled"));
+            .get_or_insert_with(|| wmacro_core_types::Macro::new("untitled"));
 
         let insert_idx = if let Some(last) = self.last_clicked_idx {
             last + 1

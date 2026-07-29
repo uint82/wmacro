@@ -1,6 +1,6 @@
 use crate::state::SharedState;
 use crate::ui::theme::ThemePalette;
-use core_types::MacroCommand;
+use wmacro_core_types::MacroCommand;
 use eframe::egui;
 
 pub fn render(
@@ -52,9 +52,9 @@ fn render_buttons(
             *commit = Some(MacroCommand::Loop { count });
             *close = true;
         }
-        
+
         ui.add_space(8.0);
-        
+
         if ui
             .add(egui::Button::new("Cancel").min_size(egui::vec2(80.0, 28.0)))
             .on_hover_cursor(egui::CursorIcon::PointingHand)

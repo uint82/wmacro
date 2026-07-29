@@ -1,6 +1,6 @@
 use crate::state::SharedState;
 use crate::ui::theme::ThemePalette;
-use core_types::{MacroCommand, MacroEvent};
+use wmacro_core_types::{MacroCommand, MacroEvent};
 use eframe::egui;
 
 pub fn render(
@@ -39,7 +39,7 @@ fn render_grid(
             ui.end_row();
 
             ui.label(egui::RichText::new("Live Cursor").color(palette.text_muted));
-            
+
             let (cx, cy, capture_hk) = {
                 let s = state.lock().unwrap_or_else(|e| {
                     log::error!("State mutex poisoned: {e}");
@@ -47,7 +47,7 @@ fn render_grid(
                 });
                 (s.cursor_x, s.cursor_y, s.macro_state.capture_hotkey)
             };
-            
+
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(format!("X: {}  Y: {}", cx, cy))

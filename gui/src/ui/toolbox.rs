@@ -105,14 +105,14 @@ fn render_toolbox_contents(
         "Else",
         palette.col_else
     ) {
-        ide.append_command_after_selection(state, core_types::MacroCommand::Else);
+        ide.append_command_after_selection(state, wmacro_core_types::MacroCommand::Else);
     }
     if tool_btn!(
         egui_phosphor::regular::STOP_CIRCLE,
         "End If",
         palette.col_end_if
     ) {
-        ide.append_command_after_selection(state, core_types::MacroCommand::EndIf);
+        ide.append_command_after_selection(state, wmacro_core_types::MacroCommand::EndIf);
     }
 
     ui.add_space(8.0);
@@ -128,7 +128,7 @@ fn render_toolbox_contents(
         "End Loop",
         palette.col_end_loop
     ) {
-        ide.append_command_after_selection(state, core_types::MacroCommand::EndLoop);
+        ide.append_command_after_selection(state, wmacro_core_types::MacroCommand::EndLoop);
     }
 
     ui.add_space(8.0);

@@ -1,5 +1,5 @@
 use crate::state::SharedState;
-use core_types::{HardwareEvent, HardwareEventKind, Macro, MacroCommand, MacroEvent, MousePosition};
+use wmacro_core_types::{HardwareEvent, HardwareEventKind, Macro, MacroCommand, MacroEvent, MousePosition};
 use log::{error, info, warn};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, SystemTime};

@@ -1,5 +1,5 @@
 use crate::state::{MacroRepeatMode, RecordHotkeyBehavior};
-use core_types::{Hotkey, Modifiers};
+use wmacro_core_types::{Hotkey, Modifiers};
 use log::error;
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +18,7 @@ pub struct Settings {
     pub repeat_mode: MacroRepeatMode,
     pub repeat_count: u32,
 
-    pub playback_options: core_types::PlaybackOptions,
+    pub playback_options: wmacro_core_types::PlaybackOptions,
 
     pub record_hotkey_behavior: RecordHotkeyBehavior,
 
@@ -73,7 +73,7 @@ impl Default for Settings {
             speed_multiplier: 1.0,
             repeat_mode: MacroRepeatMode::Once,
             repeat_count: 1,
-            playback_options: core_types::PlaybackOptions::default(),
+            playback_options: wmacro_core_types::PlaybackOptions::default(),
             record_hotkey_behavior: RecordHotkeyBehavior::default(),
             record_mouse: true,
             record_movements: true,

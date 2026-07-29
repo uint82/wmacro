@@ -3,5 +3,34 @@ resolver = "2"
 members = [
     "core_types",
     "daemon",
-    "gui"
+    "gui",
 ]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Hilmi Abroor <abroorhilmi@gmail.com>"]
+license = "GPL-3.0"
+repository = "https://github.com/uint82/wmacro"
+
+[workspace.dependencies]
+wmacro-core-types = { path = "core_types", version = "0.1.0" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
+
+# gui-only
+eframe = "0.34"
+egui = "0.34"
+bincode = "1"
+rfd = "0.17"
+directories = "5"
+egui-phosphor = "0.12"
+
+# daemon-only
+inotify = "0.11"
+evdev = "0.12"
+libc = "0.2"

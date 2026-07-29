@@ -1,6 +1,6 @@
 use super::theme::ThemePalette;
-use core_types::MousePosition;
-use core_types::{MacroButton, MacroEvent};
+use wmacro_core_types::MousePosition;
+use wmacro_core_types::{MacroButton, MacroEvent};
 use eframe::egui;
 
 pub fn badge(ui: &mut egui::Ui, text: &str, color: egui::Color32, fixed_width: Option<f32>) {

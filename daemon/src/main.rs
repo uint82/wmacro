@@ -1,4 +1,4 @@
-use core_types::{DaemonEvent, DaemonRequest, HardwareEvent, HotkeyEvent};
+use wmacro_core_types::{DaemonEvent, DaemonRequest, HardwareEvent, HotkeyEvent};
 use log::{error, info};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
