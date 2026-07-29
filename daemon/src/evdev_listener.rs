@@ -1,4 +1,4 @@
-use core_types::{
+use wmacro_core_types::{
     BTN_LEFT_CODE, BTN_MIDDLE_CODE, BTN_RIGHT_CODE, HardwareEvent, HardwareEventKind, HotkeyEvent,
     MacroButton,
 };

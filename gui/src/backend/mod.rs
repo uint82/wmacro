@@ -1,5 +1,5 @@
 use std::sync::mpsc::Sender;
-use core_types::{ClickButton, ClickType, DaemonEvent};
+use wmacro_core_types::{ClickButton, ClickType, DaemonEvent};
 
 pub mod ipc_backend;
 pub mod keymap;
@@ -12,7 +12,7 @@ pub trait ClickBackend: Send {
     fn key_down(&mut self, key: &str, code: u16) -> Result<(), String>;
     fn key_up(&mut self, key: &str, code: u16) -> Result<(), String>;
     fn type_text(&mut self, text: &str) -> Result<(), String>;
-    
+
     #[allow(clippy::too_many_arguments)]
     fn click(
         &mut self,

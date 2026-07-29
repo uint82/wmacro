@@ -1,6 +1,6 @@
 use crate::backend::ClickBackend;
 use crate::state::{MacroRepeatMode, SharedState};
-use core_types::{ClickButton, Hotkey, MacroButton, MacroCommand, MacroEvent};
+use wmacro_core_types::{ClickButton, Hotkey, MacroButton, MacroCommand, MacroEvent};
 use log::{debug, error, info, warn};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -256,7 +256,7 @@ struct PlaybackParams {
     max_loops: Option<u32>,
     record_hotkey: Option<Hotkey>,
     play_hotkey: Option<Hotkey>,
-    smart_path: core_types::SmartPathOptions,
+    smart_path: wmacro_core_types::SmartPathOptions,
 }
 
 pub fn spawn_player(state: SharedState) -> (Arc<AtomicBool>, Arc<AtomicBool>, Arc<AtomicBool>) {
@@ -481,8 +481,8 @@ fn extract_position(event: &MacroEvent, mouse_jitter: (i32, i32)) -> (i32, i32) 
     match event {
         MacroEvent::MouseMove { x, y, .. } => (*x, *y),
         MacroEvent::Click { position, .. } | MacroEvent::MouseDown { position, .. } => match position {
-            core_types::MousePosition::Absolute { x, y } => (*x + mouse_jitter.0, *y + mouse_jitter.1),
-            core_types::MousePosition::Current => (-1, -1),
+            wmacro_core_types::MousePosition::Absolute { x, y } => (*x + mouse_jitter.0, *y + mouse_jitter.1),
+            wmacro_core_types::MousePosition::Current => (-1, -1),
         },
         _ => (-1, -1),
     }
@@ -612,7 +612,7 @@ fn dispatch_event(
         MacroEvent::Delay(_) => Ok(()),
         MacroEvent::MouseMove { x, y, .. } => backend.move_to(*x, *y),
         MacroEvent::Click { position, button, hold_time_ms, .. } => {
-            if let core_types::MousePosition::Absolute { x, y } = position {
+            if let wmacro_core_types::MousePosition::Absolute { x, y } = position {
                 backend.move_to(*x + mouse_jitter.0, *y + mouse_jitter.1)?;
             }
             let btn = macro_button_to_click(button);
@@ -621,7 +621,7 @@ fn dispatch_event(
             backend.release(&btn)
         }
         MacroEvent::MouseDown { position, button, .. } => {
-            if let core_types::MousePosition::Absolute { x, y } = position {
+            if let wmacro_core_types::MousePosition::Absolute { x, y } = position {
                 backend.move_to(*x + mouse_jitter.0, *y + mouse_jitter.1)?;
             }
             backend.press(&macro_button_to_click(button))

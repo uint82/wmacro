@@ -1,4 +1,4 @@
-use core_types::Hotkey;
+use wmacro_core_types::Hotkey;
 
 pub const COMMON_KEYS: &[(u16, &str); 113] = &[
     (1, "Esc"), (59, "F1"), (60, "F2"), (61, "F3"), (62, "F4"), (63, "F5"),

@@ -2,7 +2,7 @@ use super::IdeState;
 use super::theme::*;
 use crate::state::DelayUnit;
 use crate::state::SharedState;
-use core_types::{MacroButton, MacroCommand, MacroEvent, MousePosition};
+use wmacro_core_types::{MacroButton, MacroCommand, MacroEvent, MousePosition};
 use eframe::egui;
 
 pub mod delay;

@@ -1,6 +1,6 @@
 use crate::state::SharedState;
 use crate::ui::theme::ThemePalette;
-use core_types::MacroCommand;
+use wmacro_core_types::MacroCommand;
 use eframe::egui;
 
 // TODO: implement clipboard(copy and paste) instead of simulating typing through evdev.

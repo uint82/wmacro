@@ -190,7 +190,7 @@ fn dispatch_file_action(
 
 fn start_new_macro(state: &SharedState, ide: &mut IdeState) {
     let mut s = state.lock().unwrap();
-    s.macro_state.current_macro = Some(core_types::Macro::new("untitled"));
+    s.macro_state.current_macro = Some(wmacro_core_types::Macro::new("untitled"));
     s.macro_state.events_captured = 0;
     s.macro_state.macro_name = "untitled".to_string();
     drop(s);

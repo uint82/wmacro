@@ -1,4 +1,4 @@
-use core_types::{Macro, MacroButton, MacroCommand, MacroEvent, MousePosition};
+use wmacro_core_types::{Macro, MacroButton, MacroCommand, MacroEvent, MousePosition};
 use log::warn;
 use std::collections::HashMap;
 use std::fmt::Write;

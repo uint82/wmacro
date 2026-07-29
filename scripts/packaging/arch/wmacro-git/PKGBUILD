@@ -1,5 +1,5 @@
 pkgname=wmacro-git
-pkgver=r3.9205cb5
+pkgver=r4.be8c8c3
 pkgrel=1
 pkgdesc="Macro recorder daemon and IDE for Hyprland"
 arch=('x86_64')

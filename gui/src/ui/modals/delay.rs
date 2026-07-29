@@ -1,6 +1,6 @@
 use crate::state::{DelayUnit, SharedState};
 use crate::ui::theme::ThemePalette;
-use core_types::{MacroCommand, MacroEvent};
+use wmacro_core_types::{MacroCommand, MacroEvent};
 use eframe::egui;
 
 pub fn render(

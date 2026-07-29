@@ -2,7 +2,7 @@ use super::actions::EditorActions;
 use crate::ui::IdeState;
 use crate::ui::modals::{Modal, modal_from_command};
 use crate::ui::theme::ThemePalette;
-use core_types::MacroCommand;
+use wmacro_core_types::MacroCommand;
 use eframe::egui;
 
 pub fn render_context_menu(
@@ -106,7 +106,7 @@ pub fn render_context_menu(
     let has_delay = ide.selected.iter().any(|&i| {
         matches!(
             commands.get(i),
-            Some(MacroCommand::Action(core_types::MacroEvent::Delay(_)))
+            Some(MacroCommand::Action(wmacro_core_types::MacroEvent::Delay(_)))
         )
     });
     if has_delay {

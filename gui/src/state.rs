@@ -2,7 +2,7 @@ use crate::settings::{
     default_abort_play_hotkey, default_abort_record_hotkey, default_capture_hotkey,
     default_step_play_hotkey, Settings, DEFAULT_THEME_NAME,
 };
-use core_types::{Hotkey, Macro};
+use wmacro_core_types::{Hotkey, Macro};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -71,7 +71,7 @@ pub struct MacroState {
     pub speed_multiplier: f32,
     pub repeat_mode: MacroRepeatMode,
     pub repeat_count: u32,
-    pub playback_options: core_types::PlaybackOptions,
+    pub playback_options: wmacro_core_types::PlaybackOptions,
 
     pub record_hotkey: Option<Hotkey>,
     pub abort_record_hotkey: Option<Hotkey>,
@@ -115,7 +115,7 @@ impl Default for MacroState {
             speed_multiplier: 1.0,
             repeat_mode: MacroRepeatMode::Once,
             repeat_count: 1,
-            playback_options: core_types::PlaybackOptions::default(),
+            playback_options: wmacro_core_types::PlaybackOptions::default(),
             record_hotkey: Some(Hotkey::plain(65)),
             abort_record_hotkey: default_abort_record_hotkey(),
             play_hotkey: Some(Hotkey::plain(66)),

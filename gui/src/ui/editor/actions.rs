@@ -1,7 +1,7 @@
 use super::super::modals::Modal;
 use super::IdeState;
 use crate::state::SharedState;
-use core_types::MacroCommand;
+use wmacro_core_types::MacroCommand;
 
 #[derive(Default)]
 pub struct EditorActions {
