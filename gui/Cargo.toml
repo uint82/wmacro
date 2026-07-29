@@ -1,17 +1,19 @@
 [package]
-name = "gui"
-version = "0.1.0"
-edition = "2024"
+name = "wmacro-gui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
-eframe = { version = "0.34", features = ["default"] }
-egui = "0.34"
-core_types = { path = "../core_types" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-bincode = "1"
-log = "0.4.33"
-env_logger = "0.11.11"
-rfd = "0.17.2"
-directories = "5"
-egui-phosphor = "0.12"
+wmacro-core-types.workspace = true
+eframe.workspace = true
+egui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bincode.workspace = true
+log.workspace = true
+env_logger.workspace = true
+rfd.workspace = true
+directories.workspace = true
+egui-phosphor.workspace = true
