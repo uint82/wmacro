@@ -28,8 +28,8 @@ package() {
     cd wmacro
 
     # 1. install binaries
-    install -Dm755 "target/release/daemon" "$pkgdir/usr/bin/wmacro-daemon"
-    install -Dm755 "target/release/gui" "$pkgdir/usr/bin/wmacro"
+    install -Dm755 "target/release/wmacro-daemon" "$pkgdir/usr/bin/wmacro-daemon"
+    install -Dm755 "target/release/wmacro-gui" "$pkgdir/usr/bin/wmacro"
 
     # 2. assets
     install -Dm644 "scripts/assets/wmacro.desktop" "$pkgdir/usr/share/applications/wmacro.desktop"
