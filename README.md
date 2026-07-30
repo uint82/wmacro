@@ -1,67 +1,104 @@
 # Wmacro
-
+[![Arch Linux AUR](https://img.shields.io/badge/Arch-AUR-1793D1?logo=arch-linux&logoColor=white)](https://aur.archlinux.org/packages/wmacro)
+[![Release](https://img.shields.io/github/v/release/uint82/wmacro)](https://github.com/uint82/wmacro/releases)
 
 <p align="center">
     <img src="assets/icon/wmacro.png" alt="Wmacro logo" width="200" />
 </p>
 
 
-Wmacro is a macro recorder app for Arch Linux + Hyprland. Users can record, edit, and replay mouse/keyboard events.
-It features a GUI with 13 built-in themes, shortcuts, and custom .wmr text files to save the macro.
+Wmacro is a macro recorder and automation tool for Hyprland on Wayland. Users can record, edit, and replay mouse/keyboard events.
+It features a GUI with 13 built-in themes, customizable shortcuts, and support for custom `.wmr` files to save and edit macros.
+
+---
+
+## Table of Contents
+* [Installation](#installation)
+  * [Arch Linux (AUR)](#arch-linux-aur)
+  * [Building from Source](#building-from-source)
+* [Screenshots](#screenshots)
+* [Features](#features)
+  * [Record and playback](#record-and-playback)
+  * [Editor and Flow Control](#editor-and-flow-control)
+  * [Appearance](#appearance)
+* [Roadmap](#roadmap)
+* [Contributing](#contributing)
+* [License](#license)
+
+---
 
 ## Installation
 
-Currently, `wmacro` can be installed on Arch Linux using the provided `PKGBUILD`.
+### Arch Linux (AUR)
 
-1. Clone the repository:
+#### Stable release:
    ```bash
-   git clone https://github.com/uint82/wmacro.git
-   cd wmacro/scripts/packaging/arch/wmacro-git
+   paru -S wmacro
+   ```
+   or
+   ```bash
+   yay -S wmacro
    ```
 
-2. Build and install the package:
+#### Development version:
    ```bash
-   makepkg -si
+   paru -S wmacro-git
    ```
-
-3. Add your user to the `wmacro` group to allow the GUI to communicate with the system daemon:
+   or
+   ```bash
+   yay -S wmacro-git
+   ```
+After installation, add your user to the `wmacro` group:
    ```bash
    sudo usermod -aG wmacro $USER
    ```
-
-4. Log out and log back in (or reboot) for the group changes to take effect.
-
-5. Enable and start the system daemon:
+Log out and log back in (or reboot) to reload your user group membership.
+Then enable and start the daemon:
    ```bash
    sudo systemctl enable --now wmacro-daemon
    ```
 
 ### Building from Source
 
-If you prefer to build manually or are on a different distribution, you can compile `wmacro` from source using `cargo`. Make sure you have the Rust toolchain and dependencies installed (e.g., `wayland`, `libxkbcommon`).
+If you prefer to build manually or are on a different distribution, you can compile `wmacro` from source using `cargo`.
+
+Build dependencies:
+
+- Rust toolchain (`rust`, `cargo`)
+- C compiler toolchain (`base-devel`)
+- Wayland libraries (`wayland`)
+- libxkbcommon (`libxkbcommon`)
+
+Runtime requirements:
+
+- Wayland compositor (e.g. Hyprland)
+- `grim` (required for pixel color conditions)
 
 1. Clone the repository and build the project:
    ```bash
    git clone https://github.com/uint82/wmacro.git
    cd wmacro
-   cargo build
+   cargo build --release --workspace
    ```
 
 2. Run the daemon (requires root privileges to access input devices):
    ```bash
-   sudo ./target/debug/daemon
+   sudo ./target/release/wmacro-daemon
    ```
 
 3. In a separate terminal, run the GUI:
    ```bash
-   cargo run --bin gui
+   ./target/release/wmacro-gui
    ```
+---
 
 ## Screenshots
 
 | Gruvbox Dark | Gruvbox Light  |
 | :---: | :---: |
 | ![Gruvbox Dark](assets/screenshots/gruvbox_dark.png) | ![Gruvbox Light](assets/screenshots/gruvbox_light.png) |
+
+---
 
 ## Features
 
@@ -73,7 +110,7 @@ If you prefer to build manually or are on a different distribution, you can comp
 - Record/pause/resume
 - Play/pause/resume
 - Adjustable playback speed from `0.1x` to `10.0x`
-- Adjustable repeat, humanize playback using hybrid synthetic path engine
+- Adjustable repeat count and humanized playback using a hybrid synthetic path engine
 - Smart Mouse Randomization with adjustable path wobble and endpoint jitter
 - Humanized submovements and curve adjustments for mouse paths
 - Customizable global hotkeys (default):
@@ -137,7 +174,7 @@ To create a custom theme, place a `.json` file in `~/.config/wmacro/themes/` usi
   "col_import_saved_macro": "#f38ba8"
 }
 ```
-
+---
 ## Roadmap
 - [ ] Expand flow control with advanced variables and conditions
 - [ ] Additional IDE themes and layout customizations
@@ -149,4 +186,4 @@ Contributions are always welcome! If you have a feature request, bug report, or 
 When submitting PRs, please ensure your code builds cleanly and follows the existing Rust conventions.
 
 ## License
-This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GPL-3.0-only License - see the [LICENSE](LICENSE) file for details.
