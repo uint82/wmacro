@@ -1,11 +1,11 @@
 pkgname=wmacro
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="Macro recorder daemon and IDE for Hyprland"
+pkgdesc="Macro recorder and automation tool for Hyprland"
 arch=('x86_64')
 url="https://github.com/uint82/wmacro"
-license=('GPL3')
-depends=('gcc-libs' 'glibc' 'wayland' 'libxkbcommon')
+license=('GPL-3.0-only')
+depends=('gcc-libs' 'glibc' 'hicolor-icon-theme')
 conflicts=('wmacro-git')
 options=("!debug")
 makedepends=('cargo')
