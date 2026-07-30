@@ -1,15 +1,16 @@
 pkgname=wmacro
-pkgver=1.0.0
+pkgver=0.1.0
 pkgrel=1
 pkgdesc="Macro recorder daemon and IDE for Hyprland"
 arch=('x86_64')
 url="https://github.com/uint82/wmacro"
 license=('GPL3')
 depends=('gcc-libs' 'glibc' 'wayland' 'libxkbcommon')
+conflicts=('wmacro-git')
 options=("!debug")
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/uint82/wmacro/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('insert') # `updpkgsums` to generate automatically
+sha256sums=('d07f9da81a976a7e4e9abfa2e718e0fe3c3032e501769597bf658a257ae1bfa0')
 install="wmacro.install"
 
 build() {
@@ -21,7 +22,7 @@ package() {
     cd "$pkgname-$pkgver"
 
     # 1. install binaries
-    install -Dm755 "target/release/wmacrp-daemon" "$pkgdir/usr/bin/wmacro-daemon"
+    install -Dm755 "target/release/wmacro-daemon" "$pkgdir/usr/bin/wmacro-daemon"
     install -Dm755 "target/release/wmacro-gui" "$pkgdir/usr/bin/wmacro"
 
     # 2. assets
