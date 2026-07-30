@@ -192,7 +192,7 @@ fn run_listener_loop(
     register_epoll_fd(epfd.0, inotify.as_raw_fd(), INOTIFY_TOKEN)?;
 
     let mut events = vec![libc::epoll_event { events: 0, u64: 0 }; 64];
-    let mut inotify_buf = [0u8];
+    let mut inotify_buf = [0u8; 4096];
 
     while !stop_flag.load(Ordering::SeqCst) {
         let n = unsafe {
@@ -232,21 +232,51 @@ fn handle_inotify_events(
     epfd: i32,
     devices: &mut HashMap<i32, Device>,
 ) {
-    let Ok(inotify_events) = inotify.read_events(buf) else { return };
+    let inotify_events = match inotify.read_events(buf) {
+        Ok(events) => events,
+        Err(e) => {
+            error!("Inotify read error: {}", e);
+            return;
+        }
+    };
 
     for event in inotify_events {
-        if let Some(name) = event.name {
-            let path = format!("/dev/input/{}", name.to_string_lossy());
-            if let Ok(new_device) = evdev::Device::open(&path) {
-                if is_supported_device(&new_device) {
-                    let fd = new_device.as_raw_fd();
-                    if register_epoll_fd(epfd, fd, fd as u64).is_ok() {
-                        devices.insert(fd, new_device);
-                        info!("Hotplug detected & registered: {}", path);
-                    }
-                }
-            }
+        let Some(name) = event.name else {
+            continue;
+        };
+
+        let name_str = name.to_string_lossy();
+
+        if !name_str.starts_with("event") {
+            continue;
         }
+
+        let path = format!("/dev/input/{}", name_str);
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let device = match evdev::Device::open(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                warn!("Hotplug: Failed to open {}: {}", path, e);
+                continue;
+            }
+        };
+
+        if !is_supported_device(&device) {
+            warn!("Hotplug: Device {} opened, but is not a supported mouse/keyboard.", path);
+            continue;
+        }
+
+        let fd = device.as_raw_fd();
+
+        if let Err(e) = register_epoll_fd(epfd, fd, fd as u64) {
+            error!("Hotplug: Failed to register epoll for {}: {}", path, e);
+            continue;
+        }
+
+        devices.insert(fd, device);
+        info!("Hotplug detected & registered: {}", path);
     }
 }
 
@@ -258,40 +288,56 @@ fn process_device_events(
     tx: &Sender<HardwareEvent>,
     tx_hotkey: &Sender<HotkeyEvent>,
 ) -> bool {
-    let mut disconnected = false;
+    let disconnected = {
+        let Some(device) = devices.get_mut(&fd) else {
+            return true;
+        };
 
-    if let Some(device) = devices.get_mut(&fd) {
         match device.fetch_events() {
-            Ok(ev_iter) => {
+            Ok(events) => {
                 let ts = tap_states.entry(fd).or_default();
-                for raw_ev in ev_iter {
+
+                for raw_ev in events {
                     let hw_time = raw_ev.timestamp();
                     let val = raw_ev.value();
 
                     let kind = match raw_ev.kind() {
-                        InputEventKind::Key(k) => handle_key_event(k, val, hw_time, ts, tx, tx_hotkey),
+                        InputEventKind::Key(key) => {
+                            handle_key_event(key, val, hw_time, ts, tx, tx_hotkey)
+                        }
                         InputEventKind::RelAxis(axis) => handle_rel_axis(axis, val),
-                        InputEventKind::AbsAxis(axis) => handle_abs_axis(axis, val, ts, tx_hotkey),
+                        InputEventKind::AbsAxis(axis) => {
+                            handle_abs_axis(axis, val, ts, tx_hotkey)
+                        }
                         _ => None,
                     };
 
-                    if let Some(k) = kind {
-                        if tx.send(HardwareEvent { hardware_time: hw_time, kind: k }).is_err() {
-                            return false;
-                        }
+                    let Some(kind) = kind else {
+                        continue;
+                    };
+
+                    if tx
+                        .send(HardwareEvent {
+                            hardware_time: hw_time,
+                            kind,
+                        })
+                        .is_err()
+                    {
+                        return false;
                     }
                 }
+
+                false
             }
-            Err(_) => {
-                disconnected = true;
-            }
+            Err(_) => true,
         }
-    }
+    };
 
     if disconnected {
         unsafe {
             libc::epoll_ctl(epfd, libc::EPOLL_CTL_DEL, fd, std::ptr::null_mut());
         }
+
         devices.remove(&fd);
         tap_states.remove(&fd);
         warn!("Device disconnected (fd: {})", fd);
@@ -395,3 +441,4 @@ fn dispatch_mouse_btn(
         _ => None,
     }
 }
+
