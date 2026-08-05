@@ -1,0 +1,10 @@
+pub const OVERSHOOT_PROBABILITY_MEDIUM: f32 = 0.20;
+pub const OVERSHOOT_PROBABILITY_LONG: f32 = 0.35;
+pub const OVERSHOOT_MAX_DIST: f32 = 12.0;
+pub const OVERSHOOT_DIST_SCALAR: f32 = 0.05;
+pub const SPLIT_PCT_MIN: f32 = 0.80;
+pub const SPLIT_PCT_MAX: f32 = 0.92;
+pub const POLLING_MEAN: f32 = 11.0;
+pub const POLLING_STDDEV: f32 = 1.5;
+pub const NOISE_EMA_ALPHA: f32 = 0.15;
+pub const RECORDED_STYLE: f32 = 0.25;
