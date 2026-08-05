@@ -9,6 +9,7 @@ mod macro_engine;
 mod settings;
 mod state;
 mod ui;
+pub mod image_utils;
 
 pub static GLOBAL_BACKEND: OnceLock<Mutex<Box<dyn backend::ClickBackend + Send>>> = OnceLock::new();
 pub static IPC_EVENT_RX: OnceLock<Mutex<Option<mpsc::Receiver<wmacro_core_types::DaemonEvent>>>> =

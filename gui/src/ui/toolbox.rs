@@ -101,6 +101,26 @@ fn render_toolbox_contents(
         };
     }
     if tool_btn!(
+        egui_phosphor::regular::IMAGE,
+        "If Image Found",
+        palette.col_if
+    ) {
+        ide.modal = Modal::IfImageFound {
+            target_image_path: String::new(),
+            similarity_threshold: 0.85,
+            move_cursor_if_found: false,
+            trigger_if_not_found: false,
+            search_region: crate::ui::modals::if_image::SearchRegion::WholeScreen,
+            region_top: 0,
+            region_left: 0,
+            region_width: 0,
+            region_height: 0,
+            test_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            preview_texture: None,
+            edit_idx: None,
+        };
+    }
+    if tool_btn!(
         egui_phosphor::regular::ARROWS_LEFT_RIGHT,
         "Else",
         palette.col_else

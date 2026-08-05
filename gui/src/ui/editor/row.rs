@@ -30,6 +30,16 @@ fn display_info_for(cmd: &MacroCommand, palette: &ThemePalette) -> RowDisplayInf
                 if *tolerance > 0 { format!("   tol = {}%", tolerance) } else { "".to_string() }
             ),
         ),
+        MacroCommand::IfImageFound { target_image_path, similarity_threshold, .. } => (
+            egui_phosphor::regular::IMAGE,
+            "IF IMAGE FOUND",
+            palette.col_if,
+            format!(
+                "target = {}   tol = {:.2}",
+                std::path::Path::new(target_image_path).file_name().unwrap_or_default().to_string_lossy(),
+                similarity_threshold
+            ),
+        ),
         MacroCommand::Else => (
             egui_phosphor::regular::ARROWS_LEFT_RIGHT,
             "ELSE",

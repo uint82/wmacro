@@ -22,6 +22,14 @@ fn serialize_command(out: &mut String, cmd: &MacroCommand) {
         MacroCommand::IfPixelColor { x, y, r, g, b, tolerance } => {
             let _ = writeln!(out, "IfPixelColor x={} y={} r={} g={} b={} tol={}", x, y, r, g, b, tolerance);
         }
+        MacroCommand::IfImageFound { target_image_path, similarity_threshold, move_cursor_if_found, trigger_if_not_found, region } => {
+            let _ = write!(out, "IfImageFound target=\"{}\" tol={} move={} not_found={}", target_image_path, similarity_threshold, move_cursor_if_found, trigger_if_not_found);
+            if let Some((l, t, w, h)) = region {
+                let _ = writeln!(out, " left={} top={} width={} height={}", l, t, w, h);
+            } else {
+                let _ = writeln!(out, "");
+            }
+        }
         MacroCommand::Else => {
             let _ = writeln!(out, "Else");
         }
@@ -219,6 +227,29 @@ fn parse_command(cmd: &str, args: &HashMap<String, String>) -> Option<MacroComma
             b: arg_or(args, "b", 0),
             tolerance: arg_or(args, "tol", 0),
         }),
+        "IfImageFound" => {
+            let target_image_path = args.get("target").cloned().unwrap_or_default();
+            let similarity_threshold = arg_or(args, "tol", 0.0);
+            let move_cursor_if_found = arg_or(args, "move", false);
+            let trigger_if_not_found = arg_or(args, "not_found", false);
+            let region = if args.contains_key("left") && args.contains_key("top") && args.contains_key("width") && args.contains_key("height") {
+                Some((
+                    arg_or(args, "left", 0),
+                    arg_or(args, "top", 0),
+                    arg_or(args, "width", 0),
+                    arg_or(args, "height", 0)
+                ))
+            } else {
+                None
+            };
+            Some(MacroCommand::IfImageFound {
+                target_image_path,
+                similarity_threshold,
+                move_cursor_if_found,
+                trigger_if_not_found,
+                region
+            })
+        },
         "EndIf" => Some(MacroCommand::EndIf),
         "Loop" => Some(MacroCommand::Loop { count: arg_or(args, "count", 1) }),
         "Else" => Some(MacroCommand::Else),
