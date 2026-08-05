@@ -17,6 +17,12 @@ pub mod mouse;
 pub mod mouse_move;
 pub mod overwrite;
 pub mod type_text;
+pub mod base_alert;
+pub mod warning_alert;
+pub mod daemon_alert;
+pub mod global_alert;
+
+pub use global_alert::render_global_alert;
 
 #[derive(Default, Clone, PartialEq)]
 pub enum MouseActionType {
@@ -148,6 +154,7 @@ pub enum Modal {
         edit_idx: Option<usize>,
     },
 }
+
 
 pub fn extract_pos(pos: &MousePosition) -> (i32, i32, bool) {
     match pos {
@@ -331,7 +338,7 @@ pub fn render_modal(ctx: &egui::Context, state: &SharedState, ide: &mut IdeState
     }
 }
 
-fn draw_modal_backdrop(ctx: &egui::Context) -> bool {
+pub fn draw_modal_backdrop(ctx: &egui::Context) -> bool {
     let screen = ctx.content_rect();
     let mut clicked_outside = false;
 
@@ -373,7 +380,7 @@ fn modal_title(modal: &Modal) -> String {
     }
 }
 
-fn apply_modal_visuals(ui: &mut egui::Ui, palette: &ThemePalette) -> egui::Visuals {
+pub fn apply_modal_visuals(ui: &mut egui::Ui, palette: &ThemePalette) -> egui::Visuals {
     let saved_visuals = ui.visuals().clone();
     ui.visuals_mut().widgets.inactive.weak_bg_fill = palette.bg_element_alt;
     ui.visuals_mut().widgets.inactive.fg_stroke.color = palette.text_primary;

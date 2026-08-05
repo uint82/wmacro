@@ -287,6 +287,9 @@ pub fn stop_recording(state: &SharedState) {
         let total_ms = s.macro_state.current_macro.as_ref().map(|m| m.total_duration_ms()).unwrap_or(0);
 
         s.status_msg = format!("Recorded {} events in {:.2?}", count, duration);
+        if count > 0 {
+            s.unsaved_changes = true;
+        }
         info!(
             "Recording finished. Captured {} events in {:.2?}. Total macro event timeline duration: {}ms",
             count, duration, total_ms

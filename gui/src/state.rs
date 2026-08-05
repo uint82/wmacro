@@ -141,6 +141,32 @@ impl Default for MacroState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModalAction {
+    Close,
+    Quit,
+    SaveAndQuit,
+    QuitWithoutSaving,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AlertKind {
+    Warning,
+    DaemonError,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModalAlert {
+    pub kind: AlertKind,
+    pub title: String,
+    pub message: String,
+    pub note: Option<String>,
+    pub footer_note: Option<String>,
+    pub actions: Vec<(String, ModalAction)>,
+    pub dismissible: bool,
+    pub copied_at: Option<std::time::Instant>,
+}
+
 #[derive(Debug)]
 pub struct AppState {
     pub cursor_x: i32,
@@ -150,6 +176,9 @@ pub struct AppState {
     pub status_msg: String,
 
     pub macro_state: MacroState,
+    pub unsaved_changes: bool,
+
+    pub modal_alert: Option<ModalAlert>,
 
     pub theme_name: String,
     pub theme_manager: crate::ui::theme::ThemeManager,
@@ -163,6 +192,8 @@ impl Default for AppState {
             active_capture: None,
             status_msg: String::from("Ready"),
             macro_state: MacroState::default(),
+            unsaved_changes: false,
+            modal_alert: None,
             theme_name: DEFAULT_THEME_NAME.to_string(),
             theme_manager: crate::ui::theme::ThemeManager::new(),
         }

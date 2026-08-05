@@ -64,6 +64,7 @@ impl IdeState {
         let insert_idx = insert_idx.min(m.commands.len());
         m.commands.insert(insert_idx, cmd);
         s.macro_state.events_captured = m.commands.len();
+        s.unsaved_changes = true;
 
         self.last_clicked_idx = Some(insert_idx);
         self.selected.clear();
