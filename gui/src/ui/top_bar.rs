@@ -184,7 +184,7 @@ fn dispatch_file_action(
         FileAction::New => start_new_macro(state, ide),
         FileAction::Open => spawn_open_macro(ctx, state, ide),
         FileAction::Save => spawn_save_macro(ctx, state),
-        FileAction::SaveAs => spawn_save_macro_as(ctx, state),
+        FileAction::SaveAs => spawn_save_macro_as(ctx, state, false),
     }
 }
 
@@ -193,6 +193,7 @@ fn start_new_macro(state: &SharedState, ide: &mut IdeState) {
     s.macro_state.current_macro = Some(wmacro_core_types::Macro::new("untitled"));
     s.macro_state.events_captured = 0;
     s.macro_state.macro_name = "untitled".to_string();
+    s.unsaved_changes = false;
     drop(s);
     ide.selected.clear();
 }
@@ -217,10 +218,12 @@ fn spawn_open_macro(ctx: &egui::Context, state: &SharedState, ide: &mut IdeState
                 s.macro_state.events_captured = m.commands.len();
                 s.macro_state.current_macro = Some(m);
                 s.status_msg = format!("Loaded {}", path.display());
+                s.unsaved_changes = false;
             }
             Err(e) => {
                 log::warn!("failed to load macro from {}: {e}", path.display());
-                set_status(&state, format!("Failed to load: {e}"));
+                let mut s = state.lock().unwrap();
+                s.status_msg = format!("Failed to load: {e}");
             }
         }
 
@@ -242,18 +245,26 @@ fn spawn_save_macro(ctx: &egui::Context, state: &SharedState) {
 
     std::thread::spawn(move || {
         match crate::macro_engine::storage::save_wmr(&m, &path) {
-            Ok(_) => set_status(&state, format!("Saved to {}", path.display())),
+            Ok(_) => {
+                let mut s = state.lock().unwrap();
+                s.status_msg = format!("Saved to {}", path.display());
+                s.unsaved_changes = false;
+            }
             Err(e) => {
                 log::warn!("failed to save macro to {}: {e}", path.display());
-                set_status(&state, format!("Failed to save: {e}"));
+                let mut s = state.lock().unwrap();
+                s.status_msg = format!("Failed to save: {e}");
             }
         }
         ctx.request_repaint();
     });
 }
 
-fn spawn_save_macro_as(ctx: &egui::Context, state: &SharedState) {
+pub fn spawn_save_macro_as(ctx: &egui::Context, state: &SharedState, quit_after_save: bool) {
     let Some(mut m) = state.lock().unwrap().macro_state.current_macro.clone() else {
+        if quit_after_save {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         return;
     };
 
@@ -263,7 +274,7 @@ fn spawn_save_macro_as(ctx: &egui::Context, state: &SharedState) {
     std::thread::spawn(move || {
         let Some(path) = rfd::FileDialog::new()
             .set_directory(crate::macro_engine::storage::default_macro_dir())
-            .add_filter("wmacro script", &["wmr"][..])
+            .add_filter("wmacro script", &["wmr"])
             .set_file_name(&format!("{}.wmr", m.name))
             .save_file()
         else {
@@ -280,10 +291,16 @@ fn spawn_save_macro_as(ctx: &egui::Context, state: &SharedState) {
                 s.macro_state.macro_name = m.name.clone();
                 s.macro_state.current_macro = Some(m);
                 s.status_msg = format!("Saved to {}", path.display());
+                s.unsaved_changes = false;
+                drop(s);
+                if quit_after_save {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
             }
             Err(e) => {
                 log::warn!("failed to save macro to {}: {e}", path.display());
-                set_status(&state, format!("Failed to save: {e}"));
+                let mut s = state.lock().unwrap();
+                s.status_msg = format!("Failed to save: {e}");
             }
         }
 
@@ -291,6 +308,3 @@ fn spawn_save_macro_as(ctx: &egui::Context, state: &SharedState) {
     });
 }
 
-fn set_status(state: &SharedState, msg: String) {
-    state.lock().unwrap().status_msg = msg;
-}

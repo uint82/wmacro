@@ -24,9 +24,20 @@ fn main() -> eframe::Result<()> {
         log::warn!("IPC_EVENT_RX already set.");
     }
 
-    if GLOBAL_BACKEND.set(Mutex::new(backend::build_backend(event_tx))).is_err() {
-        log::warn!("Failed to initialize global backend.");
-    }
+    let backend_status = match backend::build_backend(event_tx) {
+        Ok(backend) => {
+            if GLOBAL_BACKEND.set(Mutex::new(backend)).is_err() {
+                log::warn!("Failed to initialize global backend.");
+            }
+            Ok(())
+        }
+        Err(e) => {
+            if GLOBAL_BACKEND.set(Mutex::new(Box::new(backend::DummyBackend))).is_err() {
+                log::warn!("Failed to set dummy backend.");
+            }
+            Err(e)
+        }
+    };
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -41,6 +52,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "wmacro",
         options,
-        Box::new(|cc| Ok(Box::new(app::WmacroApp::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(app::WmacroApp::new(cc, backend_status)))),
     )
 }

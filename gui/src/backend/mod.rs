@@ -30,11 +30,36 @@ pub trait ClickBackend: Send {
     fn stop_recording(&mut self) -> Result<(), String> { Ok(()) }
 }
 
-pub fn build_backend(event_tx: Sender<DaemonEvent>) -> Box<dyn ClickBackend> {
-    let backend = ipc_backend::IpcBackend::new(event_tx).unwrap_or_else(|e| {
-        panic!("FATAL: Root daemon not found ({}). Please start the wmacro daemon.", e);
-    });
+pub struct DummyBackend;
 
-    log::info!("Successfully connected to the root daemon!");
-    Box::new(backend)
+impl ClickBackend for DummyBackend {
+    fn move_to(&mut self, _x: i32, _y: i32) -> Result<(), String> { Ok(()) }
+    fn press(&mut self, _button: &ClickButton) -> Result<(), String> { Ok(()) }
+    fn release(&mut self, _button: &ClickButton) -> Result<(), String> { Ok(()) }
+    fn scroll(&mut self, _dx: i32, _dy: i32) -> Result<(), String> { Ok(()) }
+    fn key_down(&mut self, _key: &str, _code: u16) -> Result<(), String> { Ok(()) }
+    fn key_up(&mut self, _key: &str, _code: u16) -> Result<(), String> { Ok(()) }
+    fn type_text(&mut self, _text: &str) -> Result<(), String> { Ok(()) }
+
+    fn click(
+        &mut self,
+        _target_x: i32,
+        _target_y: i32,
+        _current_x: i32,
+        _current_y: i32,
+        _button: &ClickButton,
+        _click_type: &ClickType,
+        _hold_duration_ms: u64,
+        _move_cursor: bool,
+    ) -> Result<(), String> { Ok(()) }
+}
+
+pub fn build_backend(event_tx: Sender<DaemonEvent>) -> Result<Box<dyn ClickBackend>, String> {
+    match ipc_backend::IpcBackend::new(event_tx) {
+        Ok(backend) => {
+            log::info!("Successfully connected to the root daemon!");
+            Ok(Box::new(backend))
+        }
+        Err(e) => Err(format!("Root daemon not found ({}). Please start the wmacro daemon.", e)),
+    }
 }
