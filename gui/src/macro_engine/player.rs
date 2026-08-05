@@ -204,7 +204,7 @@ impl ExecFrame {
         while self.idx + 1 < self.commands.len() {
             self.idx += 1;
             match &self.commands[self.idx] {
-                MacroCommand::IfPixelColor { .. } => nested += 1,
+                MacroCommand::IfPixelColor { .. } | MacroCommand::IfImageFound { .. } => nested += 1,
                 MacroCommand::Else if nested == 0 => return,
                 MacroCommand::EndIf => {
                     if nested == 0 { return; }
@@ -220,7 +220,7 @@ impl ExecFrame {
         while self.idx + 1 < self.commands.len() {
             self.idx += 1;
             match &self.commands[self.idx] {
-                MacroCommand::IfPixelColor { .. } => nested += 1,
+                MacroCommand::IfPixelColor { .. } | MacroCommand::IfImageFound { .. } => nested += 1,
                 MacroCommand::EndIf => {
                     if nested == 0 { return; }
                     nested -= 1;
@@ -423,6 +423,35 @@ fn run_playback_thread(
 
                             if dist > tolerance_dist {
                                 frame.skip_to_else_or_endif();
+                            }
+                        }
+                    }
+                    MacroCommand::IfImageFound { target_image_path, similarity_threshold, move_cursor_if_found, trigger_if_not_found, region } => {
+                        let reg = region.map(|(l, t, w, h)| (l, t, w, h));
+                        match crate::image_utils::find_image(&target_image_path, reg, similarity_threshold) {
+                            Ok(Some((x, y))) => {
+                                if trigger_if_not_found {
+                                    frame.skip_to_else_or_endif();
+                                } else if move_cursor_if_found {
+                                    if let Ok(img) = image::open(&target_image_path) {
+                                        let center_x = x as i32 + (img.width() / 2) as i32;
+                                        let center_y = y as i32 + (img.height() / 2) as i32;
+                                        if let Ok(mut backend_guard) = crate::GLOBAL_BACKEND.get().unwrap().lock() {
+                                            let _ = backend_guard.move_to(center_x, center_y);
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                if !trigger_if_not_found {
+                                    frame.skip_to_else_or_endif();
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("IfImageFound error: {}", e);
+                                if !trigger_if_not_found {
+                                    frame.skip_to_else_or_endif();
+                                }
                             }
                         }
                     }

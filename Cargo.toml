@@ -15,7 +15,6 @@ repository = "https://github.com/uint82/wmacro"
 
 [workspace.dependencies]
 wmacro-core-types = { path = "core_types", version = "0.1.0" }
-
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
@@ -29,8 +28,48 @@ bincode = "1"
 rfd = "0.17"
 directories = "5"
 egui-phosphor = "0.12"
+image = "0.25.10"
+imageproc = "0.27.0"
+rayon = "1.12.0"
+rustfft = "6.4.1"
+transpose = "0.2"
+libwayshot = "0.8"
+once_cell = "1.21.4"
 
 # daemon-only
 inotify = "0.11"
 evdev = "0.12"
 libc = "0.2"
+
+# compile heavy numeric/image crates at full optimisation even in debug mode.
+# this means the gui itself stays fast-to-compile while fft and image ops
+# run at near-release speed during development.
+[profile.dev.package.rustfft]
+opt-level = 3
+
+[profile.dev.package.rayon]
+opt-level = 3
+
+[profile.dev.package.rayon-core]
+opt-level = 3
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.imageproc]
+opt-level = 3
+
+[profile.dev.package.transpose]
+opt-level = 3
+
+# heads up: profile.dev.package.<name> only overrides dependencies, it never
+# touches workspace members (cargo book, profiles section: "to override the
+# settings for all dependencies (but not any workspace member)..."). the fft
+# orchestration loops (fft_rows_par, fft_cols_par, fft_cross_correlate) live
+# in fft.rs, which is part of the wmacro-gui crate, so none of the overrides
+# above reached them. they were still running at opt-level=0 even with
+# rustfft itself optimized, because that code is wmacro-gui calling into
+# rustfft, not rustfft's own code. this was the actual source of the
+# multi-second debug-build timings, not the fft library.
+[profile.dev.package.wmacro-gui]
+opt-level = 3

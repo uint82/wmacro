@@ -121,7 +121,7 @@ fn compute_indent_levels(commands: &[MacroCommand]) -> Vec<usize> {
             depth = depth.saturating_sub(1);
         }
         levels.push(depth);
-        if matches!(cmd, MacroCommand::IfPixelColor { .. } | MacroCommand::Loop { .. } | MacroCommand::Else) {
+        if matches!(cmd, MacroCommand::IfPixelColor { .. } | MacroCommand::IfImageFound { .. } | MacroCommand::Loop { .. } | MacroCommand::Else) {
             depth += 1;
         }
     }

@@ -8,6 +8,7 @@ use eframe::egui;
 pub mod delay;
 pub mod goto;
 pub mod if_color;
+pub mod if_image;
 pub mod import_macro;
 pub mod keyboard;
 pub mod label;
@@ -110,6 +111,20 @@ pub enum Modal {
         tolerance: u8,
         edit_idx: Option<usize>,
         last_check: Option<String>,
+    },
+    IfImageFound {
+        target_image_path: String,
+        similarity_threshold: f32,
+        move_cursor_if_found: bool,
+        trigger_if_not_found: bool,
+        search_region: crate::ui::modals::if_image::SearchRegion,
+        region_top: i32,
+        region_left: i32,
+        region_width: i32,
+        region_height: i32,
+        test_result: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+        preview_texture: Option<(String, egui::TextureHandle)>,
+        edit_idx: Option<usize>,
     },
     Loop {
         count: u32,
@@ -221,6 +236,26 @@ pub fn modal_from_command(cmd: &MacroCommand, idx: usize) -> Option<Modal> {
         MacroCommand::IfPixelColor { x, y, r, g, b, tolerance } => Some(Modal::IfPixelColor {
             x: *x, y: *y, r: *r, g: *g, b: *b, tolerance: *tolerance, edit_idx: Some(idx), last_check: None,
         }),
+        MacroCommand::IfImageFound { target_image_path, similarity_threshold, move_cursor_if_found, trigger_if_not_found, region } => {
+            let (search_region, region_top, region_left, region_width, region_height) = match region {
+                Some((l, t, w, h)) => (crate::ui::modals::if_image::SearchRegion::SpecificRegion, *t, *l, *w, *h),
+                None => (crate::ui::modals::if_image::SearchRegion::WholeScreen, 0, 0, 0, 0),
+            };
+            Some(Modal::IfImageFound {
+                target_image_path: target_image_path.clone(),
+                similarity_threshold: *similarity_threshold,
+                move_cursor_if_found: *move_cursor_if_found,
+                trigger_if_not_found: *trigger_if_not_found,
+                search_region,
+                region_top,
+                region_left,
+                region_width,
+                region_height,
+                test_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                preview_texture: None,
+                edit_idx: Some(idx),
+            })
+        },
         MacroCommand::Loop { count } => Some(Modal::Loop { count: *count, edit_idx: Some(idx) }),
         MacroCommand::Label(name) => Some(Modal::Label { name: name.clone(), edit_idx: Some(idx) }),
         MacroCommand::Goto(target) => Some(Modal::Goto { target: target.clone(), edit_idx: Some(idx) }),
@@ -327,6 +362,7 @@ fn modal_title(modal: &Modal) -> String {
         Modal::Mouse { .. } => format!("{} Mouse Action", egui_phosphor::regular::MOUSE),
         Modal::Key { .. } => format!("{} Keyboard Event", egui_phosphor::regular::KEYBOARD),
         Modal::IfPixelColor { .. } => format!("{} If Pixel Color Equals", egui_phosphor::regular::PALETTE),
+        Modal::IfImageFound { .. } => format!("{} If Image Found", egui_phosphor::regular::IMAGE),
         Modal::Loop { .. } => format!("{} Loop Sequence", egui_phosphor::regular::REPEAT),
         Modal::Label { .. } => format!("{} Label", egui_phosphor::regular::TAG),
         Modal::Goto { .. } => format!("{} Goto", egui_phosphor::regular::LINK),
@@ -388,6 +424,7 @@ fn get_edit_idx(modal: &Modal) -> Option<usize> {
         | Modal::MouseMove { edit_idx, .. }
         | Modal::Key { edit_idx, .. }
         | Modal::IfPixelColor { edit_idx, .. }
+        | Modal::IfImageFound { edit_idx, .. }
         | Modal::Loop { edit_idx, .. }
         | Modal::Label { edit_idx, .. }
         | Modal::Goto { edit_idx, .. }
@@ -422,6 +459,9 @@ fn route_modal_render(
         }
         Modal::IfPixelColor { x, y, r, g, b, tolerance, edit_idx, last_check } => {
             if_color::render(ui, state, palette, close, commit, x, y, r, g, b, tolerance, edit_idx, last_check)
+        }
+        Modal::IfImageFound { target_image_path, similarity_threshold, move_cursor_if_found, trigger_if_not_found, search_region, region_top, region_left, region_width, region_height, test_result, preview_texture, edit_idx } => {
+            if_image::render(ui, state, palette, close, commit, target_image_path, similarity_threshold, move_cursor_if_found, trigger_if_not_found, search_region, region_top, region_left, region_width, region_height, test_result, preview_texture, edit_idx)
         }
         Modal::Loop { count, edit_idx } => {
             loop_macro::render(ui, state, palette, close, commit, count, edit_idx)

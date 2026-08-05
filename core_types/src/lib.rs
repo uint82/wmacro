@@ -319,6 +319,7 @@ impl Macro {
 pub enum MacroCommand {
     Action(MacroEvent),
     IfPixelColor { x: i32, y: i32, r: u8, g: u8, b: u8, tolerance: u8 },
+    IfImageFound { target_image_path: String, similarity_threshold: f32, move_cursor_if_found: bool, trigger_if_not_found: bool, region: Option<(i32, i32, i32, i32)> },
     Else,
     EndIf,
     Loop { count: u32 },
@@ -329,4 +330,8 @@ pub enum MacroCommand {
     TypeText(String),
     // TODO: add BreakLoop action for dynamically escaping loops.
     // TODO: add ExitMacro action for halting execution early.
+    //
+    // priority:
+    // TODO: add varaibles to save coord x and coord y.
+    // TODO: add "if compare" action for comparing 2 variables using comparison operator.
 }
