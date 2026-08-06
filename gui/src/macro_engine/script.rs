@@ -54,6 +54,13 @@ fn serialize_command(out: &mut String, cmd: &MacroCommand) {
         MacroCommand::TypeText(text) => {
             let _ = writeln!(out, "TypeText text=\"{}\"", text);
         }
+        MacroCommand::OpenFile { path, args, run_as_admin } => {
+            let _ = writeln!(
+                out,
+                "OpenFile path=\"{}\" args=\"{}\" admin={}",
+                path, args, run_as_admin
+            );
+        }
     }
 }
 
@@ -258,6 +265,16 @@ fn parse_command(cmd: &str, args: &HashMap<String, String>) -> Option<MacroComma
         "Label" => args.get("name").cloned().map(MacroCommand::Label),
         "Goto" => args.get("target").cloned().map(MacroCommand::Goto),
         "TypeText" => args.get("text").cloned().map(MacroCommand::TypeText),
+        "OpenFile" => {
+            let path = args.get("path").cloned().unwrap_or_default();
+            let args_str = args.get("args").cloned().unwrap_or_default();
+            let run_as_admin = arg_or(args, "admin", false);
+            Some(MacroCommand::OpenFile {
+                path,
+                args: args_str,
+                run_as_admin,
+            })
+        }
         _ => None,
     }
 }

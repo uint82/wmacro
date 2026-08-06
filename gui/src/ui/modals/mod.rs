@@ -17,6 +17,7 @@ pub mod mouse;
 pub mod mouse_move;
 pub mod overwrite;
 pub mod type_text;
+pub mod open_file;
 pub mod base_alert;
 pub mod warning_alert;
 pub mod daemon_alert;
@@ -153,6 +154,13 @@ pub enum Modal {
         text: String,
         edit_idx: Option<usize>,
     },
+    OpenFile {
+        path: String,
+        args: String,
+        run_as_admin: bool,
+        edit_idx: Option<usize>,
+        pending_path: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    },
 }
 
 
@@ -267,6 +275,13 @@ pub fn modal_from_command(cmd: &MacroCommand, idx: usize) -> Option<Modal> {
         MacroCommand::Label(name) => Some(Modal::Label { name: name.clone(), edit_idx: Some(idx) }),
         MacroCommand::Goto(target) => Some(Modal::Goto { target: target.clone(), edit_idx: Some(idx) }),
         MacroCommand::TypeText(text) => Some(Modal::TypeText { text: text.clone(), edit_idx: Some(idx) }),
+        MacroCommand::OpenFile { path, args, run_as_admin } => Some(Modal::OpenFile {
+            path: path.clone(),
+            args: args.clone(),
+            run_as_admin: *run_as_admin,
+            edit_idx: Some(idx),
+            pending_path: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        }),
         MacroCommand::PlayMacro(path) => Some(Modal::ImportMacro {
             path: path.clone(), edit_idx: Some(idx), pending_path: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }),
@@ -376,6 +391,7 @@ fn modal_title(modal: &Modal) -> String {
         Modal::ImportMacro { .. } => format!("{} Import Macro", egui_phosphor::regular::FOLDER_OPEN),
         Modal::TypeText { .. } => format!("{} Type Text", egui_phosphor::regular::TEXT_T),
         Modal::MouseMove { .. } => format!("{} Move Mouse", egui_phosphor::regular::ARROWS_OUT_CARDINAL),
+        Modal::OpenFile { .. } => format!("{} Open File / Program", egui_phosphor::regular::FILE_ARROW_UP),
         Modal::None => String::new(),
     }
 }
@@ -436,7 +452,8 @@ fn get_edit_idx(modal: &Modal) -> Option<usize> {
         | Modal::Label { edit_idx, .. }
         | Modal::Goto { edit_idx, .. }
         | Modal::ImportMacro { edit_idx, .. }
-        | Modal::TypeText { edit_idx, .. } => *edit_idx,
+        | Modal::TypeText { edit_idx, .. }
+        | Modal::OpenFile { edit_idx, .. } => *edit_idx,
         _ => None,
     }
 }
@@ -484,6 +501,9 @@ fn route_modal_render(
         }
         Modal::TypeText { text, edit_idx } => {
             type_text::render(ui, state, palette, close, commit, text, edit_idx)
+        }
+        Modal::OpenFile { path, args, run_as_admin, edit_idx, pending_path } => {
+            open_file::render(ui, state, palette, close, commit, path, args, run_as_admin, edit_idx, pending_path)
         }
     }
 }

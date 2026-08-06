@@ -55,6 +55,3 @@ coverage/
 *.pkg.tar.gz
 pkg/
 
-# core dumps
-core
-core.*
