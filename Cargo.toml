@@ -35,6 +35,7 @@ rustfft = "6.4.1"
 transpose = "0.2"
 libwayshot = "0.8"
 once_cell = "1.21.4"
+which = "8.0.5"
 
 # daemon-only
 inotify = "0.11"

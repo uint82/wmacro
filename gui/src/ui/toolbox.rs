@@ -189,6 +189,19 @@ fn render_toolbox_contents(
             pending_path: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
     }
+    if tool_btn!(
+        egui_phosphor::regular::FILE_ARROW_UP,
+        "Open File / Program",
+        palette.col_import_saved_macro
+    ) {
+        ide.modal = Modal::OpenFile {
+            path: String::new(),
+            args: String::new(),
+            run_as_admin: false,
+            edit_idx: None,
+            pending_path: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        };
+    }
 }
 
 fn current_cursor_pos(state: &SharedState) -> (i32, i32) {

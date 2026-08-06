@@ -88,6 +88,27 @@ fn display_info_for(cmd: &MacroCommand, palette: &ThemePalette) -> RowDisplayInf
             palette.col_type_text,
             text.clone(),
         ),
+        MacroCommand::OpenFile { path, args, run_as_admin } => (
+            egui_phosphor::regular::FILE_ARROW_UP,
+            "OPEN FILE",
+            palette.col_import_saved_macro,
+            {
+                let name = std::path::Path::new(path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+
+                let admin_tag = if *run_as_admin { " (sudo)" } else { "" };
+                let trimmed_args = args.trim();
+
+                if trimmed_args.is_empty() {
+                    format!("{}{}", name, admin_tag)
+                } else {
+                    format!("{} {}{}", name, trimmed_args, admin_tag)
+                }
+            },
+        ),
     };
 
     RowDisplayInfo {

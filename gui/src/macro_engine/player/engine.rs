@@ -144,6 +144,14 @@ fn process_command(
         MacroCommand::EndIf => FlowControl::Continue,
         MacroCommand::Loop { count } => execute_loop_cmd(*count, frame),
         MacroCommand::EndLoop => execute_end_loop(frame),
+        MacroCommand::OpenFile { path, args, run_as_admin } => {
+            if ctx.loop_num == 1 {
+                execute_open_file(path, args, *run_as_admin);
+            } else {
+                log::debug!("OpenFile: skipping '{}' on loop {} to prevent multiple instances", path, ctx.loop_num);
+            }
+            FlowControl::Continue
+        }
     }
 }
 
@@ -299,5 +307,73 @@ fn finalize_playback(state: &SharedState, ctx: &mut PlaybackContext, playback_st
         s.macro_state.playing = false;
         s.status_msg = format!("Macro done in {:.2?}", actual_duration);
         ctx.metrics.report(actual_duration);
+    }
+}
+
+fn parse_args(raw: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut quote_char = '"';
+
+    for ch in raw.chars() {
+        match ch {
+            '"' | '\'' if !in_quotes => {
+                in_quotes = true;
+                quote_char = ch;
+            }
+            c if in_quotes && c == quote_char => {
+                in_quotes = false;
+            }
+            ' ' | '\t' if !in_quotes => {
+                if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+
+    if !current.is_empty() {
+        args.push(current);
+    }
+
+    args
+}
+
+fn execute_open_file(path: &str, args: &str, run_as_admin: bool) {
+    let parsed_args = parse_args(args);
+
+    let resolved_executable = which::which(path);
+
+    let result = if let Ok(exec_path) = resolved_executable {
+        if run_as_admin {
+            let mut cmd = std::process::Command::new("pkexec");
+            cmd.arg(exec_path);
+            cmd.args(&parsed_args);
+            cmd.spawn()
+        } else {
+            let mut cmd = std::process::Command::new(exec_path);
+            cmd.args(&parsed_args);
+            cmd.spawn()
+        }
+    } else {
+        let path_buf = std::path::Path::new(path);
+
+        if !path_buf.exists() {
+            error!("OpenFile: command not found in PATH and path does not exist: {}", path);
+            return;
+        }
+
+        std::process::Command::new("xdg-open").arg(path).spawn()
+    };
+
+    match result {
+        Ok(_) => {
+            log::info!("OpenFile: launched '{}'", path);
+        }
+        Err(e) => {
+            error!("OpenFile: failed to launch '{}': {}", path, e);
+        }
     }
 }

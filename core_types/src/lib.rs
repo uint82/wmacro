@@ -328,6 +328,11 @@ pub enum MacroCommand {
     Label(String),
     Goto(String),
     TypeText(String),
+    OpenFile {
+        path: String,
+        args: String,
+        run_as_admin: bool,
+    },
     // TODO: add BreakLoop action for dynamically escaping loops.
     // TODO: add ExitMacro action for halting execution early.
     //
