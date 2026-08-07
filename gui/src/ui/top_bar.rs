@@ -40,7 +40,7 @@ fn render_title_and_version(ui: &mut egui::Ui, palette: &crate::ui::theme::Theme
         .inner_margin(egui::Margin::symmetric(5, 1))
         .show(ui, |ui| {
             ui.label(
-                egui::RichText::new("v0.1.0")
+                egui::RichText::new("v0.2.0")
                     .size(9.0)
                     .color(palette.text_muted),
             );
