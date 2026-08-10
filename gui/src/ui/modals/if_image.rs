@@ -1,5 +1,7 @@
 use crate::state::SharedState;
+use crate::ui::screen_picker::{self, PickerTarget};
 use crate::ui::theme::ThemePalette;
+use crate::ui::IdeState;
 use wmacro_core_types::MacroCommand;
 use eframe::egui;
 
@@ -10,7 +12,7 @@ pub enum SearchRegion {
     SpecificRegion,
 }
 
-fn load_preview(ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
+pub(super) fn load_preview(ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
     let img = image::open(path).ok()?;
     let rgb = img.to_rgba8();
     let (w, h) = (rgb.width() as usize, rgb.height() as usize);
@@ -33,7 +35,7 @@ fn preview_display_size(tex: &egui::TextureHandle, max_size: f32) -> egui::Vec2 
     // zncc is a pixel-perfect 1:1 structural match. if the preview
     // is rendered on screen at exactly 1:1 scale (scale == 1.0), the screenshot
     // will contain a perfect copy of the target template inside the modal ui,
-    // causing a false positive match. by lowering the scale will prevent that.
+    // causing a false positive match. lowering the scale prevents that.
     if (scale - 1.0).abs() < 0.15 {
         scale = 0.82;
     }
@@ -44,6 +46,7 @@ fn preview_display_size(tex: &egui::TextureHandle, max_size: f32) -> egui::Vec2 
 pub fn render(
     ui: &mut egui::Ui,
     _state: &SharedState,
+    ide: &mut IdeState,
     palette: &ThemePalette,
     close: &mut bool,
     commit: &mut Option<MacroCommand>,
@@ -124,33 +127,23 @@ pub fn render(
 
             ui.horizontal(|ui| {
                 if ui.button(format!("{} Capture", egui_phosphor::regular::CAMERA)).clicked() {
-                    let base_dir = std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
-                        let home = std::env::var("HOME").expect("HOME directory not found");
-                        format!("{}/.local/share", home)
-                    });
-
-                    let wmacro_dir = format!("{}/wmacro/captures", base_dir);
-
-                    if let Err(e) = std::fs::create_dir_all(&wmacro_dir) {
-                        log::error!("Failed to create capture directory: {}", e);
-                    }
-
-                    let path = format!(
-                        "{}/capture_{}.png",
-                        wmacro_dir,
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs()
-                    );
-
-                    if crate::image_utils::capture_area(&path).is_ok() {
-                        crate::image_utils::invalidate_target_cache(&path);
-                        *preview_texture = load_preview(ui.ctx(), &path)
-                            .map(|tex| (path.clone(), tex));
-                        *target_image_path = path;
-                    } else {
-                        log::error!("Failed to capture area");
+                    match screen_picker::ScreenPicker::freeze(
+                        PickerTarget::TargetImage,
+                        ui.ctx(),
+                    ) {
+                        Ok(picker) => ide.screen_picker = Some(picker),
+                        Err(e) => {
+                            log::warn!("frozen capture unavailable, falling back to slurp: {e:#}");
+                            let path = screen_picker::new_capture_path();
+                            if crate::image_utils::capture_area(&path).is_ok() {
+                                crate::image_utils::invalidate_target_cache(&path);
+                                *preview_texture = load_preview(ui.ctx(), &path)
+                                    .map(|tex| (path.clone(), tex));
+                                *target_image_path = path;
+                            } else {
+                                log::error!("Failed to capture area");
+                            }
+                        }
                     }
                 }
 
@@ -236,22 +229,31 @@ pub fn render(
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.button("Capture Region").clicked() {
-                    if let Ok(geom) = crate::image_utils::select_region() {
-                        let geom = geom.trim();
-                        if let Some((pos_str, size_str)) = geom.split_once(' ') {
-                            if let (Some((x_str, y_str)), Some((w_str, h_str))) =
-                                (pos_str.split_once(','), size_str.split_once('x'))
-                            {
-                                if let (Ok(x), Ok(y), Ok(w), Ok(h)) = (
-                                    x_str.parse(),
-                                    y_str.parse(),
-                                    w_str.parse(),
-                                    h_str.parse(),
-                                ) {
-                                    *region_left = x;
-                                    *region_top = y;
-                                    *region_width = w;
-                                    *region_height = h;
+                    match screen_picker::ScreenPicker::freeze(
+                        PickerTarget::SearchRegion,
+                        ui.ctx(),
+                    ) {
+                        Ok(picker) => ide.screen_picker = Some(picker),
+                        Err(e) => {
+                            log::warn!("frozen capture unavailable, falling back to slurp: {e:#}");
+                            if let Ok(geom) = crate::image_utils::select_region() {
+                                let geom = geom.trim();
+                                if let Some((pos_str, size_str)) = geom.split_once(' ') {
+                                    if let (Some((x_str, y_str)), Some((w_str, h_str))) =
+                                        (pos_str.split_once(','), size_str.split_once('x'))
+                                    {
+                                        if let (Ok(x), Ok(y), Ok(w), Ok(h)) = (
+                                            x_str.parse(),
+                                            y_str.parse(),
+                                            w_str.parse(),
+                                            h_str.parse(),
+                                        ) {
+                                            *region_left = x;
+                                            *region_top = y;
+                                            *region_width = w;
+                                            *region_height = h;
+                                        }
+                                    }
                                 }
                             }
                         }

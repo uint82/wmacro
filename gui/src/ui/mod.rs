@@ -2,6 +2,7 @@ pub mod components;
 pub mod editor;
 pub mod key_names;
 pub mod modals;
+pub mod screen_picker;
 pub mod settings;
 pub mod status_bar;
 pub mod theme;
@@ -35,6 +36,7 @@ pub struct IdeState {
     pub last_clicked_idx: Option<usize>,
     pub selection_start_pos: Option<egui::Pos2>,
     pub drag_start_selection: std::collections::HashSet<usize>,
+    pub screen_picker: Option<screen_picker::ScreenPicker>,
 }
 
 impl IdeState {

@@ -1,4 +1,5 @@
 use super::IdeState;
+use super::screen_picker;
 use super::theme::*;
 use crate::state::DelayUnit;
 use crate::state::SharedState;
@@ -299,6 +300,27 @@ pub fn render_modal(ctx: &egui::Context, state: &SharedState, ide: &mut IdeState
         return;
     }
 
+    if ide.screen_picker.is_some() {
+        {
+            let mut s = state.lock().unwrap_or_else(|e| {
+                log::error!("State mutex poisoned: {e}");
+                e.into_inner()
+            });
+            let _ = s.active_capture.take();
+        }
+        let outcome = ide
+            .screen_picker
+            .as_mut()
+            .and_then(|picker| screen_picker::render_picker(ctx, picker));
+        if let Some(outcome) = outcome {
+            if let Some(picker) = ide.screen_picker.take() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                apply_picker_outcome(ctx, state, &mut ide.modal, picker.target, outcome);
+            }
+        }
+        return;
+    }
+
     let palette = {
         let s = state.lock().unwrap_or_else(|e| {
             log::error!("State mutex poisoned: {e}");
@@ -440,6 +462,53 @@ fn handle_active_capture(state: &SharedState, modal: &mut Modal) {
     }
 }
 
+fn apply_picker_outcome(
+    ctx: &egui::Context,
+    _state: &SharedState,
+    modal: &mut Modal,
+    target: screen_picker::PickerTarget,
+    outcome: screen_picker::PickerOutcome,
+) {
+    use screen_picker::PickerOutcome;
+    match outcome {
+        PickerOutcome::Cancelled => {}
+        PickerOutcome::Region { x, y, w, h, image } => match (target, modal) {
+            (
+                screen_picker::PickerTarget::SearchRegion,
+                Modal::IfImageFound {
+                    region_top,
+                    region_left,
+                    region_width,
+                    region_height,
+                    ..
+                },
+            ) => {
+                *region_top = y;
+                *region_left = x;
+                *region_width = w;
+                *region_height = h;
+            }
+            (
+                screen_picker::PickerTarget::TargetImage,
+                Modal::IfImageFound {
+                    target_image_path,
+                    preview_texture,
+                    ..
+                },
+            ) => match screen_picker::save_capture_png(&image) {
+                Ok(path) => {
+                    crate::image_utils::invalidate_target_cache(&path);
+                    *target_image_path = path.clone();
+                    *preview_texture =
+                        if_image::load_preview(ctx, &path).map(|tex| (path, tex));
+                }
+                Err(e) => log::error!("failed to save captured image: {e:#}"),
+            },
+            _ => {}
+        },
+    }
+}
+
 fn get_edit_idx(modal: &Modal) -> Option<usize> {
     match modal {
         Modal::Delay { .. } => None,
@@ -466,7 +535,10 @@ fn route_modal_render(
     close: &mut bool,
     commit: &mut Option<MacroCommand>,
 ) {
-    match &mut ide.modal {
+    // take the modal out of `ide` so the individual renderers can also
+    // borrow `ide` (they need it to open the screen picker).
+    let mut modal = std::mem::take(&mut ide.modal);
+    match &mut modal {
         Modal::None => {}
         Modal::OverwriteWarning => overwrite::render(ui, state, palette, close),
         Modal::Delay { value, unit, target_indices } => {
@@ -485,7 +557,7 @@ fn route_modal_render(
             if_color::render(ui, state, palette, close, commit, x, y, r, g, b, tolerance, edit_idx, last_check)
         }
         Modal::IfImageFound { target_image_path, similarity_threshold, move_cursor_if_found, trigger_if_not_found, search_region, region_top, region_left, region_width, region_height, test_result, preview_texture, edit_idx } => {
-            if_image::render(ui, state, palette, close, commit, target_image_path, similarity_threshold, move_cursor_if_found, trigger_if_not_found, search_region, region_top, region_left, region_width, region_height, test_result, preview_texture, edit_idx)
+            if_image::render(ui, state, ide, palette, close, commit, target_image_path, similarity_threshold, move_cursor_if_found, trigger_if_not_found, search_region, region_top, region_left, region_width, region_height, test_result, preview_texture, edit_idx)
         }
         Modal::Loop { count, edit_idx } => {
             loop_macro::render(ui, state, palette, close, commit, count, edit_idx)
@@ -506,4 +578,5 @@ fn route_modal_render(
             open_file::render(ui, state, palette, close, commit, path, args, run_as_admin, edit_idx, pending_path)
         }
     }
+    ide.modal = modal;
 }
