@@ -54,4 +54,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| Ok(Box::new(app::WmacroApp::new(cc, backend_status)))),
     )
+    .ok();
+
+    std::process::exit(0);
 }

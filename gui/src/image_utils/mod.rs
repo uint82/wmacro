@@ -4,6 +4,7 @@ pub mod fft;
 pub mod integral;
 pub mod math;
 pub mod matching;
+pub mod outputs;
 pub mod wayland;
 
 use anyhow::Result;
