@@ -1,13 +1,16 @@
+//! background thread translating daemon hotkey events into recording and playback actions.
+
 use crate::macro_engine::player::spawn_player;
 use crate::macro_engine::recorder::{start_recording, stop_recording};
 use crate::state::{AppState, RecordHotkeyBehavior, SharedState};
 use crate::ui::settings::save_settings;
-use wmacro_core_types::{Hotkey, HotkeyEvent, Modifiers};
+use std::sync::MutexGuard;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
-use std::sync::MutexGuard;
+use wmacro_core_types::{Hotkey, HotkeyEvent, Modifiers};
 
 pub fn spawn_hotkey_listener(state: SharedState, rx_hotkey: Receiver<HotkeyEvent>) {
+    // hotkeys must keep working even when the UI thread is busy, so the listener runs on its own thread, one event at a time.
     std::thread::spawn(move || {
         let mut mods = Modifiers::default();
         while let Ok(event) = rx_hotkey.recv() {
@@ -17,6 +20,7 @@ pub fn spawn_hotkey_listener(state: SharedState, rx_hotkey: Receiver<HotkeyEvent
 }
 
 fn handle_event(event: &HotkeyEvent, state: &SharedState, mods: &mut Modifiers) {
+    // key releases only feed the modifier tracker; everything below acts on key-down edges so holding a key cannot fire the hotkey repeatedly.
     if mods.apply(event.code, event.pressed) || !event.pressed {
         return;
     }
@@ -26,6 +30,7 @@ fn handle_event(event: &HotkeyEvent, state: &SharedState, mods: &mut Modifiers) 
     let mut guard = state.lock().unwrap();
 
     macro_rules! bind_if_pending {
+        // capture-the-next-key mode: whatever key was just pressed becomes the new binding, then the settings are persisted immediately.
         ($flag:ident, $hotkey:ident, $msg:expr) => {
             if guard.macro_state.$flag {
                 guard.macro_state.$hotkey = Some(Hotkey::new(code, held_mods));
@@ -56,7 +61,11 @@ fn handle_event(event: &HotkeyEvent, state: &SharedState, mods: &mut Modifiers) 
         step_play_hotkey,
         "Step Play key set to code {}"
     );
-    bind_if_pending!(binding_capture, capture_hotkey, "Capture key set to code {}");
+    bind_if_pending!(
+        binding_capture,
+        capture_hotkey,
+        "Capture key set to code {}"
+    );
 
     let is_match = |hotkey: Option<Hotkey>| hotkey.is_some_and(|h| h.matches(code, &held_mods));
 

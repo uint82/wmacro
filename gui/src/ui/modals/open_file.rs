@@ -1,141 +1,176 @@
+//! the Open File / Program modal: lets the user pick a path, arguments, and admin flag.
+
 use crate::state::SharedState;
 use crate::ui::theme::ThemePalette;
-use wmacro_core_types::MacroCommand;
 use eframe::egui;
 use std::sync::{Arc, Mutex};
+use wmacro_core_types::MacroCommand;
 
-pub fn render(
-    ui: &mut egui::Ui,
-    _state: &SharedState,
-    palette: &ThemePalette,
-    close: &mut bool,
-    commit: &mut Option<MacroCommand>,
-    path: &mut String,
-    args: &mut String,
-    run_as_admin: &mut bool,
-    edit_idx: &Option<usize>,
-    pending_path: &Arc<Mutex<Option<String>>>,
-) {
-    if let Ok(mut pending) = pending_path.lock() {
-        if let Some(new_path) = pending.take() {
-            *path = new_path;
-        }
+use super::modal_trait::ModalWidget;
+use super::types::ModalOutcome;
+use super::variable::auto_focus;
+
+pub struct OpenFileModal {
+    pub path: String,
+    pub args: String,
+    pub run_as_admin: bool,
+    pub edit_idx: Option<usize>,
+    pub pending_path: Arc<Mutex<Option<String>>>,
+}
+
+impl ModalWidget for OpenFileModal {
+    fn title(&self) -> String {
+        format!(
+            "{} Open File / Program",
+            egui_phosphor::regular::FILE_ARROW_UP
+        )
     }
 
-    ui.add_space(8.0);
+    fn edit_idx(&self) -> Option<usize> {
+        self.edit_idx
+    }
 
-    ui.label(egui::RichText::new("Program or File Path:").color(palette.text_primary).size(13.0))
-        .on_hover_text("Enter a program name (like 'obsidian' or 'firefox') or an absolute file path.");
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.add(
-            egui::TextEdit::singleline(path)
-                .desired_width(230.0)
-                .hint_text("e.g., firefox or /path/to/file")
-        );
+    fn autofocus_ids(&self) -> &[&'static str] {
+        &["open_file_path", "open_file_args"]
+    }
 
-        if ui
-            .add(
-                egui::Button::new(egui::RichText::new("Browse…").size(12.0))
-                    .min_size(egui::vec2(70.0, 24.0)),
-            )
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
+    fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        _state: &SharedState,
+        palette: &ThemePalette,
+    ) -> ModalOutcome {
+        if let Ok(mut pending) = self.pending_path.lock()
+            && let Some(new_path) = pending.take()
         {
-            spawn_file_picker(pending_path.clone(), ui.ctx().clone());
+            self.path = new_path;
         }
-    });
 
-    let path_trimmed = path.trim();
-    let path_is_empty = path_trimmed.is_empty();
+        let path_focused = ui
+            .ctx()
+            .memory(|m| m.focused() == Some(egui::Id::new("open_file_path")));
+        let args_focused = ui
+            .ctx()
+            .memory(|m| m.focused() == Some(egui::Id::new("open_file_args")));
+        let submitted =
+            (path_focused || args_focused) && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
-    let path_exists = !path_is_empty && which::which(path_trimmed).is_ok();
+        let mut path_resp = None;
 
-    if !path_is_empty && !path_exists {
-        ui.add_space(3.0);
+        ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(format!("{} Path does not exist.", egui_phosphor::regular::WARNING))
-                .color(palette.accent_danger)
-                .size(11.0),
-        );
-    } else {
-        ui.add_space(15.0);
-    }
-
-    ui.add_space(8.0);
-
-    ui.label(
-        egui::RichText::new("Arguments (optional):")
-            .color(palette.text_primary)
-            .size(13.0),
-    );
-    ui.add_space(4.0);
-    ui.add(
-        egui::TextEdit::singleline(args)
-            .desired_width(f32::INFINITY)
-            .hint_text("--flag \"value with spaces\""),
-    );
-
-    ui.add_space(10.0);
-
-    ui.horizontal(|ui| {
-        ui.checkbox(run_as_admin, "");
-        ui.label(
-            egui::RichText::new("Run as administrator (pkexec)")
+            egui::RichText::new("Program or File Path:")
                 .color(palette.text_primary)
                 .size(13.0),
         )
-        .on_hover_text("Uses PolicyKit (pkexec) to securely request admin rights via a graphical prompt.");
-    });
+        .on_hover_text(
+            "Enter a program name (like 'obsidian' or 'firefox') or an absolute file path.",
+        );
+        ui.add_space(4.0);
 
-    ui.add_space(16.0);
-    ui.separator();
-    ui.add_space(8.0);
-
-    let is_valid = path_exists;
-    render_buttons(ui, close, commit, edit_idx, path, args, *run_as_admin, is_valid);
-}
-
-fn spawn_file_picker(pending_path: Arc<Mutex<Option<String>>>, ctx: egui::Context) {
-    std::thread::spawn(move || {
-        if let Some(picked) = rfd::FileDialog::new().pick_file() {
-            if let Ok(mut p) = pending_path.lock() {
-                *p = Some(picked.to_string_lossy().into_owned());
-            }
-        }
-        ctx.request_repaint();
-    });
-}
-
-fn render_buttons(
-    ui: &mut egui::Ui,
-    close: &mut bool,
-    commit: &mut Option<MacroCommand>,
-    edit_idx: &Option<usize>,
-    path: &str,
-    args: &str,
-    run_as_admin: bool,
-    is_valid: bool,
-) {
-    ui.horizontal(|ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let label = if edit_idx.is_some() { "Save" } else { "Add" };
+        ui.horizontal(|ui| {
+            path_resp = Some(
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.path)
+                        .id(egui::Id::new("open_file_path"))
+                        .desired_width(230.0)
+                        .hint_text("e.g., firefox or /path/to/file"),
+                ),
+            );
 
             if ui
-                .add_enabled(
-                    is_valid,
-                    egui::Button::new(egui::RichText::new(label).strong())
-                        .min_size(egui::vec2(80.0, 28.0)),
+                .add(
+                    egui::Button::new(egui::RichText::new("Browse…").size(12.0))
+                        .min_size(egui::vec2(70.0, ui.spacing().interact_size.y)),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
-                *commit = Some(MacroCommand::OpenFile {
-                    path: path.trim().to_string(),
-                    args: args.trim().to_string(),
-                    run_as_admin,
-                });
-                *close = true;
+                spawn_file_picker(self.pending_path.clone(), ui.ctx().clone());
+            }
+        });
+
+        if let Some(resp) = path_resp {
+            auto_focus(ui, "open_file_path", &resp);
+        }
+
+        let path_trimmed = self.path.trim();
+        let path_exists = !path_trimmed.is_empty() && which::which(path_trimmed).is_ok();
+
+        // the save button stays disabled until the path exists.
+        if !path_trimmed.is_empty() && !path_exists {
+            ui.add_space(3.0);
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} Path does not exist.",
+                    egui_phosphor::regular::WARNING
+                ))
+                .color(palette.accent_danger)
+                .size(11.0),
+            );
+        } else {
+            ui.add_space(15.0);
+        }
+
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new("Arguments (optional):")
+                .color(palette.text_primary)
+                .size(13.0),
+        );
+        ui.add_space(4.0);
+        ui.add(
+            egui::TextEdit::singleline(&mut self.args)
+                .id(egui::Id::new("open_file_args"))
+                .desired_width(f32::INFINITY)
+                .hint_text("--flag \"value with spaces\""),
+        );
+
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.run_as_admin, "");
+            ui.label(
+                egui::RichText::new("Run as administrator (pkexec)")
+                    .color(palette.text_primary)
+                    .size(13.0),
+            )
+            .on_hover_text(
+                "Uses PolicyKit (pkexec) to securely request admin rights via a graphical prompt.",
+            );
+        });
+
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(8.0);
+
+        let make_cmd = || MacroCommand::OpenFile {
+            path: self.path.trim().to_string(),
+            args: self.args.trim().to_string(),
+            run_as_admin: self.run_as_admin,
+        };
+
+        if submitted && path_exists {
+            return ModalOutcome::Commit(make_cmd());
+        }
+
+        let label = if self.edit_idx.is_some() {
+            "Save"
+        } else {
+            "Add"
+        };
+        let mut outcome = ModalOutcome::Open;
+
+        super::right_aligned_row(ui, |ui| {
+            if ui
+                .add_enabled(
+                    path_exists,
+                    egui::Button::new(egui::RichText::new(label).strong())
+                        .min_size(egui::vec2(80.0, ui.spacing().interact_size.y * 1.2)),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                outcome = ModalOutcome::Commit(make_cmd());
             }
 
             ui.add_space(8.0);
@@ -143,13 +178,27 @@ fn render_buttons(
             if ui
                 .add(
                     egui::Button::new(egui::RichText::new("Cancel"))
-                        .min_size(egui::vec2(80.0, 28.0)),
+                        .min_size(egui::vec2(80.0, ui.spacing().interact_size.y * 1.2)),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
-                *close = true;
+                outcome = ModalOutcome::Cancelled;
             }
         });
+
+        outcome
+    }
+}
+
+fn spawn_file_picker(pending_path: Arc<Mutex<Option<String>>>, ctx: egui::Context) {
+    // TODO: remember the last used directory so the dialog opens there next time.
+    std::thread::spawn(move || {
+        if let Some(picked) = rfd::FileDialog::new().pick_file()
+            && let Ok(mut p) = pending_path.lock()
+        {
+            *p = Some(picked.to_string_lossy().into_owned());
+        }
+        ctx.request_repaint();
     });
 }

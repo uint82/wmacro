@@ -34,3 +34,5 @@ gbm-sys.workspace = true
 libc.workspace = true
 wayland-client.workspace = true
 wayland-protocols.workspace = true
+wl-clipboard-rs.workspace = true
+x11rb.workspace = true

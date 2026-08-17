@@ -1,8 +1,12 @@
+//! records hardware events into a macro, converting them to macro events with the delays between them.
+
 use crate::state::SharedState;
-use wmacro_core_types::{HardwareEvent, HardwareEventKind, Macro, MacroCommand, MacroEvent, MousePosition};
 use log::{error, info, warn};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, SystemTime};
+use wmacro_core_types::{
+    HardwareEvent, HardwareEventKind, Macro, MacroCommand, MacroEvent, MousePosition,
+};
 
 fn call_backend<F>(action: F) -> Result<(), String>
 where
@@ -65,10 +69,10 @@ impl TimeTracker {
             if event_time < start_t {
                 return None;
             }
-            if let Some(first_t) = self.first_event_time {
-                if first_t < start_t {
-                    self.reset();
-                }
+            if let Some(first_t) = self.first_event_time
+                && first_t < start_t
+            {
+                self.reset();
             }
         }
 
@@ -146,7 +150,10 @@ fn map_hardware_event(
 
             if config.record_mouse && config.record_movements && is_new_pos {
                 *last_recorded_pos = Some((cx, cy));
-                Some(MacroEvent::MouseMove { x: cx, y: cy })
+                Some(MacroEvent::MouseMove {
+                    x: wmacro_core_types::Coord::Const(cx),
+                    y: wmacro_core_types::Coord::Const(cy),
+                })
             } else {
                 None
             }
@@ -156,7 +163,10 @@ fn map_hardware_event(
                 let (cx, cy) = get_cursor_position(config.cursor_x, config.cursor_y);
                 *last_recorded_pos = Some((cx, cy));
                 Some(MacroEvent::MouseDown {
-                    position: MousePosition::Absolute { x: cx, y: cy },
+                    position: MousePosition::Absolute {
+                        x: wmacro_core_types::Coord::Const(cx),
+                        y: wmacro_core_types::Coord::Const(cy),
+                    },
                     button: button.clone(),
                     jitter: 0,
                 })
@@ -169,7 +179,10 @@ fn map_hardware_event(
                 let (cx, cy) = get_cursor_position(config.cursor_x, config.cursor_y);
                 *last_recorded_pos = Some((cx, cy));
                 Some(MacroEvent::MouseUp {
-                    position: MousePosition::Absolute { x: cx, y: cy },
+                    position: MousePosition::Absolute {
+                        x: wmacro_core_types::Coord::Const(cx),
+                        y: wmacro_core_types::Coord::Const(cy),
+                    },
                     button: button.clone(),
                     jitter: 0,
                 })
@@ -179,14 +192,20 @@ fn map_hardware_event(
         }
         HardwareEventKind::KeyDown(ref key, code) => {
             if config.record_keyboard {
-                Some(MacroEvent::KeyDown { key: key.clone(), code })
+                Some(MacroEvent::KeyDown {
+                    key: key.clone(),
+                    code,
+                })
             } else {
                 None
             }
         }
         HardwareEventKind::KeyUp(ref key, code) => {
             if config.record_keyboard {
-                Some(MacroEvent::KeyUp { key: key.clone(), code })
+                Some(MacroEvent::KeyUp {
+                    key: key.clone(),
+                    code,
+                })
             } else {
                 None
             }
@@ -213,7 +232,9 @@ pub fn spawn_recorder(state: SharedState, rx: Receiver<HardwareEvent>) {
                 continue;
             }
 
-            let Some(delay_us) = tracker.process_time(event.hardware_time, config.session_start, config.is_paused) else {
+            let Some(delay_us) =
+                tracker.process_time(event.hardware_time, config.session_start, config.is_paused)
+            else {
                 continue;
             };
 
@@ -240,20 +261,24 @@ fn commit_event(state: &SharedState, delay_us: u64, event: MacroEvent) {
 
         if let Some(ref mut m) = s.macro_state.current_macro {
             if delay_us > 0 {
-                m.commands.push(MacroCommand::Action(MacroEvent::Delay(delay_us)));
+                m.commands
+                    .push(MacroCommand::Action(MacroEvent::Delay(delay_us)));
             }
             m.commands.push(MacroCommand::Action(event));
+            s.macro_state.appended_row = Some(m.commands.len() - 1);
         }
     }
 }
 
 pub fn start_recording(state: &SharedState, name: String, append: bool) {
     if let Ok(mut s) = state.lock() {
+        s.macro_state.push_undo();
         if append {
             if s.macro_state.current_macro.is_none() {
                 s.macro_state.current_macro = Some(Macro::new(name));
             }
-            s.macro_state.events_captured = s.macro_state.current_macro.as_ref().unwrap().commands.len();
+            s.macro_state.events_captured =
+                s.macro_state.current_macro.as_ref().unwrap().commands.len();
             s.status_msg = String::from("Recording (Appending)… (move & click to capture)");
         } else {
             s.macro_state.current_macro = Some(Macro::new(name));
@@ -263,10 +288,15 @@ pub fn start_recording(state: &SharedState, name: String, append: bool) {
 
         s.macro_state.recording = true;
         s.macro_state.record_paused = false;
-        s.macro_state.record_paused_flag = Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        s.macro_state.record_paused_flag = Some(std::sync::Arc::new(
+            std::sync::atomic::AtomicBool::new(false),
+        ));
         s.macro_state.recording_start = Some(SystemTime::now());
 
-        info!("Recording started (append: {}) at {:?}", append, s.macro_state.recording_start);
+        info!(
+            "Recording started (append: {}) at {:?}",
+            append, s.macro_state.recording_start
+        );
     }
 
     if let Err(e) = call_backend(|b| b.start_recording()) {
@@ -283,8 +313,17 @@ pub fn stop_recording(state: &SharedState) {
         s.macro_state.record_paused = false;
 
         let count = s.macro_state.events_captured;
-        let duration = s.macro_state.recording_start.and_then(|t| t.elapsed().ok()).unwrap_or_default();
-        let total_ms = s.macro_state.current_macro.as_ref().map(|m| m.total_duration_ms()).unwrap_or(0);
+        let duration = s
+            .macro_state
+            .recording_start
+            .and_then(|t| t.elapsed().ok())
+            .unwrap_or_default();
+        let total_ms = s
+            .macro_state
+            .current_macro
+            .as_ref()
+            .map(|m| m.total_duration_ms())
+            .unwrap_or(0);
 
         s.status_msg = format!("Recorded {} events in {:.2?}", count, duration);
         if count > 0 {

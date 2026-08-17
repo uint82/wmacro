@@ -1,9 +1,15 @@
-use egui_phosphor::regular;
+//! bottom status bar summarizing playback/recording state, step position, and block analysis of the current macro.
+
 use crate::state::SharedState;
+use crate::ui::block_analysis::{BlockAnalysis, analyze_blocks};
+use crate::ui::editor::row::WARNING_AMBER;
 use eframe::egui;
+use egui_phosphor::regular;
 
 pub fn render_status_bar(ui: &mut egui::Ui, state: &SharedState) {
-    let (palette, msg, recording, playing, current_step, current_loop, ev_total) = {
+    // snapshot everything under one lock so the bar shows one consistent
+    // moment instead of mixing values from different frames.
+    let (palette, msg, recording, playing, current_step, current_loop, ev_total, analysis) = {
         let Ok(s) = state.lock() else {
             log::error!("Failed to render status bar: state mutex is poisoned.");
             return;
@@ -15,6 +21,13 @@ pub fn render_status_bar(ui: &mut egui::Ui, state: &SharedState) {
             .as_ref()
             .map_or(0, |m| m.commands.len());
 
+        let analysis = s
+            .macro_state
+            .current_macro
+            .as_ref()
+            .map(|m| analyze_blocks(&m.commands))
+            .unwrap_or_default();
+
         (
             s.theme_manager.get_theme(&s.theme_name),
             s.status_msg.clone(),
@@ -23,10 +36,11 @@ pub fn render_status_bar(ui: &mut egui::Ui, state: &SharedState) {
             s.macro_state.current_step,
             s.macro_state.current_loop,
             total,
+            analysis,
         )
     };
 
-    // TODO: crate central config for width, size, etc
+    // TODO: crate central config for width, size, etc.
     egui::Panel::bottom("ide_status")
         .frame(
             egui::Frame::NONE
@@ -50,11 +64,7 @@ pub fn render_status_bar(ui: &mut egui::Ui, state: &SharedState) {
                     regular::CIRCLE
                 };
 
-                ui.label(
-                    egui::RichText::new(icon)
-                        .color(color)
-                        .size(12.0),
-                );
+                ui.label(egui::RichText::new(icon).color(color).size(12.0));
 
                 let display_msg = if playing && current_loop > 1 {
                     format!("{} (Loop {})", msg, current_loop)
@@ -67,8 +77,41 @@ pub fn render_status_bar(ui: &mut egui::Ui, state: &SharedState) {
                 if playing && ev_total > 0 {
                     render_playback_progress(ui, current_step, ev_total, palette.text_muted);
                 }
+
+                render_block_problems(ui, &analysis);
             });
         });
+}
+
+fn render_block_problems(ui: &mut egui::Ui, analysis: &BlockAnalysis) {
+    // broken block structure breaks playback, so surface it both here and on the offending rows in the editor.
+    let unclosed = analysis.open_ifs + analysis.open_loops;
+    let orphan_count = analysis.orphan_end.iter().filter(|&&o| o).count();
+
+    if unclosed == 0 && orphan_count == 0 {
+        return;
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    if unclosed > 0 {
+        parts.push(format!(
+            "{unclosed} unclosed block{}",
+            if unclosed == 1 { "" } else { "s" }
+        ));
+    }
+    if orphan_count > 0 {
+        parts.push(format!(
+            "{orphan_count} orphan close{}",
+            if orphan_count == 1 { "" } else { "s" }
+        ));
+    }
+
+    let text = format!("{} {}", regular::WARNING, parts.join(" · "));
+
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.label(egui::RichText::new(text).color(WARNING_AMBER).size(11.0))
+            .on_hover_text("Unclosed blocks and orphan End commands — marked in the command list");
+    });
 }
 
 fn render_playback_progress(

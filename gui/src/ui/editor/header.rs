@@ -1,3 +1,5 @@
+//! editor header bar: macro name, unsaved-changes badge, and the primary action buttons.
+
 use crate::state::SharedState;
 use crate::ui::components::badge;
 use crate::ui::theme::ThemePalette;

@@ -1,5 +1,9 @@
+//! top-level egui ui module: declares the submodules and hosts `IdeState`, the per-frame ui state shared by the toolbar, toolbox, and editor.
+
+pub mod block_analysis;
 pub mod components;
 pub mod editor;
+pub mod key_bindings;
 pub mod key_names;
 pub mod modals;
 pub mod screen_picker;
@@ -37,9 +41,34 @@ pub struct IdeState {
     pub selection_start_pos: Option<egui::Pos2>,
     pub drag_start_selection: std::collections::HashSet<usize>,
     pub screen_picker: Option<screen_picker::ScreenPicker>,
+    pub toolbox_search: String,
+    pub focus_toolbox_search: bool,
+    pub pending_scroll_to_row: Option<usize>,
+    pub folded_blocks: std::collections::HashSet<usize>,
+    pub find_open: bool,
+    pub find_query: String,
+    pub find_match_idx: usize,
+    pub find_just_opened: bool,
+    pub find_replace_mode: bool,
+    pub find_replace_query: String,
+
+    /// rows that were just appended; painted with a fading highlight.
+    pub flash_rows: std::collections::HashSet<usize>,
+    /// `ui.input(|i| i.time)` when the flash started; set on first render.
+    pub flash_started_at: Option<f64>,
+
+    /// (row index, draft text) of the open inline value editor, if any.
+    pub inline_edit: Option<(usize, String)>,
 }
 
 impl IdeState {
+    /// marks a row as freshly appended: the editor scrolls it into view and paints a brief highlight.
+    pub fn mark_row_appended(&mut self, row: usize) {
+        self.pending_scroll_to_row = Some(row);
+        self.flash_rows.insert(row);
+        self.flash_started_at = None;
+    }
+
     pub fn append_command_after_selection(
         &mut self,
         state: &SharedState,
@@ -50,6 +79,9 @@ impl IdeState {
             return;
         };
 
+        s.macro_state.push_undo();
+
+        // insertion lands after the last clicked row when there is one, else after the selection tail, else at the end. TODO: make this policy configurable.
         let m = s
             .macro_state
             .current_macro
@@ -71,6 +103,7 @@ impl IdeState {
         self.last_clicked_idx = Some(insert_idx);
         self.selected.clear();
         self.selected.insert(insert_idx);
+        self.mark_row_appended(insert_idx);
     }
 }
 
@@ -82,11 +115,14 @@ pub fn render(ui: &mut egui::Ui, state: &SharedState, ide: &mut IdeState) {
 
     let ctx = ui.ctx().clone();
 
-    let palette = match state.lock() {
-        Ok(s) => s.theme_manager.get_theme(&s.theme_name),
+    let (palette, show_toolbox) = match state.lock() {
+        Ok(s) => (s.theme_manager.get_theme(&s.theme_name), s.show_toolbox),
         Err(e) => {
-            log::error!("State mutex is poisoned ({}). Falling back to default theme.", e);
-            theme::ThemeManager::default_theme()
+            log::error!(
+                "State mutex is poisoned ({}). Falling back to default theme.",
+                e
+            );
+            (theme::ThemeManager::default_theme(), true)
         }
     };
 
@@ -101,7 +137,9 @@ pub fn render(ui: &mut egui::Ui, state: &SharedState, ide: &mut IdeState) {
         });
 
     status_bar::render_status_bar(ui, state);
-    toolbox::render_toolbox(ui, state, ide);
+    if show_toolbox {
+        toolbox::render_toolbox(ui, state, ide);
+    }
     editor::render_editor(ui, state, ide);
 
     modals::render_modal(&ctx, state, ide);

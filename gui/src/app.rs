@@ -1,3 +1,5 @@
+//! the eframe app: wires the egui ui to the recorder, player, hotkey listener, and cursor tracker.
+
 use eframe::egui;
 use std::sync::Arc;
 
@@ -17,6 +19,7 @@ impl WmacroApp {
     pub fn new(cc: &eframe::CreationContext, backend_status: Result<(), String>) -> Self {
         let state = new_shared_state();
 
+        // a dead daemon makes recording and playback impossible, so refuse to start quietly; the alert doubles as instructions for fixing it.
         if let Err(e) = backend_status {
             state.lock().unwrap().modal_alert = Some(crate::state::ModalAlert {
                 kind: crate::state::AlertKind::DaemonError,
@@ -27,9 +30,7 @@ impl WmacroApp {
                 ),
                 note: Some("sudo systemctl enable --now wmacro-daemon".to_string()),
                 footer_note: Some("(Paste this into your terminal before exiting)".to_string()),
-                actions: vec![
-                    ("Exit App".to_string(), crate::state::ModalAction::Quit),
-                ],
+                actions: vec![("Exit App".to_string(), crate::state::ModalAction::Quit)],
                 dismissible: false,
                 copied_at: None,
             });
@@ -59,6 +60,7 @@ impl WmacroApp {
 }
 
 fn setup_egui_styles(ctx: &egui::Context, state: &SharedState) {
+    // phosphor icons ship as font glyphs, so they ride along in the same font atlas as the UI text.
     let mut fonts = egui::FontDefinitions::default();
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
     ctx.set_fonts(fonts);
@@ -96,9 +98,12 @@ fn setup_egui_styles(ctx: &egui::Context, state: &SharedState) {
 
 impl eframe::App for WmacroApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // intercept the close request to offer a save; the CancelClose keeps the window alive while the alert modal is answered.
         if ctx.input(|i| i.viewport().close_requested()) {
             let mut state = self.state.lock().unwrap();
-            let has_content = state.macro_state.current_macro
+            let has_content = state
+                .macro_state
+                .current_macro
                 .as_ref()
                 .map(|m| !m.commands.is_empty())
                 .unwrap_or(false);
@@ -124,11 +129,15 @@ impl eframe::App for WmacroApp {
 
         let occluded = ctx.input(|i| i.viewport().occluded).unwrap_or(false);
 
+        // an occluded window (e.g. on another virtual desktop) needs no rendering, but must keep waking to notice it became visible again.
         if occluded {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
             return;
         }
 
+        if matches!(self.ide_state.modal, ui::Modal::None) && !self.ide_state.show_settings {
+            handle_global_shortcuts(&self.state, &mut self.ide_state, ctx);
+        }
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
 
@@ -136,5 +145,28 @@ impl eframe::App for WmacroApp {
         ui::render(ui, &self.state, &mut self.ide_state);
 
         crate::ui::modals::render_global_alert(ui.ctx(), &self.state);
+    }
+}
+
+fn handle_global_shortcuts(state: &SharedState, ide: &mut ui::IdeState, ctx: &egui::Context) {
+    let (ctrl_b, ctrl_f) = ctx.input(|i| {
+        (
+            i.modifiers.ctrl && !i.modifiers.shift && i.key_pressed(egui::Key::B),
+            i.modifiers.ctrl && !i.modifiers.shift && i.key_pressed(egui::Key::F),
+        )
+    });
+
+    if ctrl_b {
+        let mut s = state.lock().unwrap();
+        s.show_toolbox = !s.show_toolbox;
+        drop(s);
+        crate::ui::settings::save_settings(state);
+    }
+
+    if ctrl_f {
+        let mut s = state.lock().unwrap();
+        s.show_toolbox = true;
+        drop(s);
+        ide.focus_toolbox_search = true;
     }
 }

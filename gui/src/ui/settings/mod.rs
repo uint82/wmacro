@@ -1,3 +1,5 @@
+//! the settings module: renders the settings window, its tabs, and saves changes.
+
 pub mod general;
 pub mod hotkeys;
 pub mod playback;
@@ -14,6 +16,8 @@ pub fn save_settings(state: &SharedState) {
         Err(e) => log::error!("Failed to save settings: state mutex is poisoned ({})", e),
     }
 }
+
+// TODO: persist the last active settings tab across app restarts.
 
 pub fn render_settings(ctx: &egui::Context, state: &SharedState, ide: &mut IdeState) {
     if !ide.show_settings {
@@ -38,9 +42,7 @@ pub fn render_settings(ctx: &egui::Context, state: &SharedState, ide: &mut IdeSt
         .frame(modal_frame(&palette))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-
                 render_footer(ui, &palette, &mut close);
                 ui.add_space(8.0);
                 ui.add_space(16.0);
@@ -52,7 +54,11 @@ pub fn render_settings(ctx: &egui::Context, state: &SharedState, ide: &mut IdeSt
                     ui.add(egui::Separator::default());
                     ui.add_space(10.0);
 
-                    route_tab(ui, state, &palette, &ide.settings_tab);
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            route_tab(ui, state, &palette, &ide.settings_tab);
+                        });
                 });
             });
 
@@ -66,6 +72,7 @@ pub fn render_settings(ctx: &egui::Context, state: &SharedState, ide: &mut IdeSt
     }
 }
 
+// TODO: make the settings window height adapt to the active tab's content.
 fn draw_backdrop(ctx: &egui::Context) -> bool {
     let screen = ctx.content_rect();
     let mut clicked = false;
@@ -92,31 +99,93 @@ fn draw_backdrop(ctx: &egui::Context) -> bool {
 
 fn render_tab_bar(ui: &mut egui::Ui, palette: &ThemePalette, current_tab: &mut SettingsTab) {
     ui.horizontal(|ui| {
-        render_tab_button(ui, palette, current_tab, SettingsTab::General, egui_phosphor::regular::GEAR, "General", 110.0);
+        render_tab_button(
+            ui,
+            palette,
+            current_tab,
+            SettingsTab::General,
+            egui_phosphor::regular::GEAR,
+            "General",
+            110.0,
+        );
         ui.add_space(4.0);
-        render_tab_button(ui, palette, current_tab, SettingsTab::Hotkeys, egui_phosphor::regular::KEYBOARD, "Hotkeys", 110.0);
+        render_tab_button(
+            ui,
+            palette,
+            current_tab,
+            SettingsTab::Hotkeys,
+            egui_phosphor::regular::KEYBOARD,
+            "Keybindings",
+            120.0,
+        );
         ui.add_space(4.0);
-        render_tab_button(ui, palette, current_tab, SettingsTab::Playback, egui_phosphor::regular::PLAY, "Playback", 100.0);
+        render_tab_button(
+            ui,
+            palette,
+            current_tab,
+            SettingsTab::Playback,
+            egui_phosphor::regular::PLAY,
+            "Playback",
+            100.0,
+        );
         ui.add_space(4.0);
-        render_tab_button(ui, palette, current_tab, SettingsTab::Recording, egui_phosphor::regular::RECORD, "Recording", 100.0);
+        render_tab_button(
+            ui,
+            palette,
+            current_tab,
+            SettingsTab::Recording,
+            egui_phosphor::regular::RECORD,
+            "Recording",
+            100.0,
+        );
     });
 }
 
-fn render_tab_button(ui: &mut egui::Ui, palette: &ThemePalette, current_tab: &mut SettingsTab, target_tab: SettingsTab, icon: &str, label: &str, width: f32) {
+fn render_tab_button(
+    ui: &mut egui::Ui,
+    palette: &ThemePalette,
+    current_tab: &mut SettingsTab,
+    target_tab: SettingsTab,
+    icon: &str,
+    label: &str,
+    width: f32,
+) {
     let is_active = *current_tab == target_tab;
-    let color = if is_active { palette.accent_primary } else { palette.text_muted };
-    let fill = if is_active { palette.bg_element } else { palette.bg_surface };
+    let color = if is_active {
+        palette.accent_primary
+    } else {
+        palette.text_muted
+    };
+    let fill = if is_active {
+        palette.bg_element
+    } else {
+        palette.bg_surface
+    };
 
-    if ui.add(
-        egui::Button::new(egui::RichText::new(format!("{}  {}", icon, label)).color(color).strong().size(13.0))
+    if ui
+        .add(
+            egui::Button::new(
+                egui::RichText::new(format!("{}  {}", icon, label))
+                    .color(color)
+                    .strong()
+                    .size(13.0),
+            )
             .fill(fill)
             .min_size(egui::vec2(width, 30.0)),
-    ).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
         *current_tab = target_tab;
     }
 }
 
-fn route_tab(ui: &mut egui::Ui, state: &SharedState, palette: &ThemePalette, current_tab: &SettingsTab) {
+fn route_tab(
+    ui: &mut egui::Ui,
+    state: &SharedState,
+    palette: &ThemePalette,
+    current_tab: &SettingsTab,
+) {
     match current_tab {
         SettingsTab::General => general::render(ui, state, palette),
         SettingsTab::Hotkeys => hotkeys::render(ui, state, palette),
@@ -128,11 +197,19 @@ fn route_tab(ui: &mut egui::Ui, state: &SharedState, palette: &ThemePalette, cur
 fn render_footer(ui: &mut egui::Ui, palette: &ThemePalette, close: &mut bool) {
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add(
-                egui::Button::new(egui::RichText::new("Close").color(palette.text_primary).strong())
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("Close")
+                            .color(palette.text_primary)
+                            .strong(),
+                    )
                     .fill(palette.bg_element_alt)
                     .min_size(egui::vec2(80.0, 28.0)),
-            ).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
                 *close = true;
             }
         });

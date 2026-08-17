@@ -1,3 +1,5 @@
+//! in-memory cache of decoded target images, keyed by path.
+
 use anyhow::{Context, Result};
 use image::GrayImage;
 use std::collections::HashMap;
@@ -13,12 +15,15 @@ pub(crate) fn load_target_cached(path: &str) -> Result<Arc<GrayImage>> {
             return Ok(img.clone());
         }
     }
-    let img_rgba = image::open(path).context("Failed to open target image")?.into_rgba8();
+    let img_rgba = image::open(path)
+        .context("Failed to open target image")?
+        .into_rgba8();
     let w = img_rgba.width();
     let h = img_rgba.height();
     let mut img = GrayImage::new(w, h);
-    
-    img_rgba.into_raw()
+
+    img_rgba
+        .into_raw()
         .chunks_exact(4)
         .zip(img.iter_mut())
         .for_each(|(rgba, g)| {

@@ -1,12 +1,24 @@
+//! small reusable egui widgets (badges, status chips, tool buttons) and display helpers for coordinates and events.
+
 use super::theme::ThemePalette;
-use wmacro_core_types::MousePosition;
-use wmacro_core_types::{MacroButton, MacroEvent};
 use eframe::egui;
+use wmacro_core_types::{Coord, MousePosition};
+use wmacro_core_types::{MacroButton, MacroEvent};
+
+/// renders a coordinate for row details: literal numbers as-is, variables as `$name`.
+pub fn format_coord_display(c: &Coord) -> String {
+    match c {
+        Coord::Const(v) => v.to_string(),
+        Coord::Var(name) => format!("${}", name),
+    }
+}
 
 pub fn badge(ui: &mut egui::Ui, text: &str, color: egui::Color32, fixed_width: Option<f32>) {
+    // fill at 15% alpha keeps the badge legible on any theme background; the label itself stays at the full accent color.
     let fill_color = egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 40);
 
     if let Some(w) = fixed_width {
+        // TODO: replace magic 20.0 height with a style-driven row height so badge alignment survives font scale changes.
         let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 20.0), egui::Sense::hover());
 
         ui.painter()
@@ -32,8 +44,22 @@ pub fn tool_button(
     icon: &str,
     label: &str,
     color: egui::Color32,
+    tooltip: &str,
+    enabled: bool,
     palette: &ThemePalette,
 ) -> bool {
+    // a disabled tool stays clickable for nothing; only its label dims, so the toolbox reads as a list even when the macro list is empty.
+    let icon_color = if enabled {
+        color
+    } else {
+        color.gamma_multiply(0.4)
+    };
+    let label_color = if enabled {
+        palette.text_primary
+    } else {
+        palette.text_muted
+    };
+
     let resp = egui::Frame::NONE
         .fill(palette.bg_element)
         .corner_radius(egui::CornerRadius::same(6))
@@ -41,27 +67,37 @@ pub fn tool_button(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(icon).color(color).size(15.0));
+                ui.label(egui::RichText::new(icon).color(icon_color).size(15.0));
                 ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new(label)
-                        .color(palette.text_primary)
-                        .size(13.0),
+                ui.add(
+                    egui::Label::new(egui::RichText::new(label).color(label_color).size(13.0))
+                        .truncate(),
                 );
             });
         });
-    let r = resp.response
-        .interact(egui::Sense::click())
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
 
-    if r.hovered() {
+    let mut r = if enabled {
+        resp.response
+            .interact(egui::Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        resp.response.interact(egui::Sense::hover())
+    };
+
+    if enabled && r.hovered() {
         ui.painter().rect_filled(
             resp.response.rect,
             egui::CornerRadius::same(6),
             egui::Color32::from_rgba_unmultiplied(255, 255, 255, 8),
         );
     }
-    r.clicked()
+
+    if !tooltip.is_empty() {
+        r = r.on_hover_text(tooltip);
+    }
+
+    // double clicks on tool buttons would fire twice, which is rude for anything that inserts a command; guard them out.
+    r.clicked() && !r.double_clicked()
 }
 
 pub fn status_chip(
@@ -137,7 +173,11 @@ pub fn event_display_info(
             egui_phosphor::regular::CURSOR,
             "MOVE",
             palette.col_move,
-            format!("x = {}   y = {}", x, y),
+            format!(
+                "x = {}   y = {}",
+                format_coord_display(x),
+                format_coord_display(y)
+            ),
         ),
         MacroEvent::Click {
             position,
@@ -151,17 +191,18 @@ pub fn event_display_info(
                 MacroButton::Middle => "Middle",
             };
             let pos_str = match position {
-                MousePosition::Absolute { x, y } => format!("x = {}    y = {}", x, y),
+                MousePosition::Absolute { x, y } => format!(
+                    "x = {}    y = {}",
+                    format_coord_display(x),
+                    format_coord_display(y)
+                ),
                 MousePosition::Current => "Current Position".to_string(),
             };
             (
                 egui_phosphor::regular::MOUSE,
                 "CLICK",
                 palette.col_click,
-                format!(
-                    "{}    {}   ({}ms hold)",
-                    btn, pos_str, hold_time_ms
-                ),
+                format!("{}    {}   ({}ms hold)", btn, pos_str, hold_time_ms),
             )
         }
         MacroEvent::MouseDown {
@@ -175,7 +216,11 @@ pub fn event_display_info(
                 MacroButton::Middle => "Middle",
             };
             let pos_str = match position {
-                MousePosition::Absolute { x, y } => format!("x = {}    y = {}", x, y),
+                MousePosition::Absolute { x, y } => format!(
+                    "x = {}    y = {}",
+                    format_coord_display(x),
+                    format_coord_display(y)
+                ),
                 MousePosition::Current => "Current Position".to_string(),
             };
             (
@@ -196,7 +241,11 @@ pub fn event_display_info(
                 MacroButton::Middle => "Middle",
             };
             let pos_str = match position {
-                MousePosition::Absolute { x, y } => format!("x = {}    y = {}", x, y),
+                MousePosition::Absolute { x, y } => format!(
+                    "x = {}    y = {}",
+                    format_coord_display(x),
+                    format_coord_display(y)
+                ),
                 MousePosition::Current => "Current Position".to_string(),
             };
             (
@@ -216,13 +265,13 @@ pub fn event_display_info(
             egui_phosphor::regular::KEYBOARD,
             "KEY DOWN",
             palette.col_keyboard,
-            format!("{}", key),
+            key.to_string(),
         ),
         MacroEvent::KeyUp { key, .. } => (
             egui_phosphor::regular::KEYBOARD,
             "KEY UP",
             palette.col_keyboard,
-            format!("{}", key),
+            key.to_string(),
         ),
         MacroEvent::KeyPress {
             key, hold_time_ms, ..

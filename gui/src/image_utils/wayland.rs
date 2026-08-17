@@ -1,10 +1,14 @@
+//! region selection and screen capture via the slurp and grim Wayland tools.
+
 use anyhow::{Context, Result};
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
 pub fn select_region() -> Result<String> {
-    let output = Command::new("slurp").output().context("Failed to execute slurp")?;
+    let output = Command::new("slurp")
+        .output()
+        .context("Failed to execute slurp")?;
     if !output.status.success() {
         anyhow::bail!("slurp cancelled or failed");
     }
@@ -39,11 +43,7 @@ pub fn highlight_region(left: i32, top: i32, width: i32, height: i32, duration_s
 
     thread::spawn(move || {
         let mut child = std::process::Command::new("slurp")
-            .args([
-                "-r",
-                "-b", "00000088",
-                "-c", "ffffffff",
-            ])
+            .args(["-r", "-b", "00000088", "-c", "ffffffff"])
             .stdin(std::process::Stdio::piped())
             .spawn()
             .expect("slurp highlight spawn failed");

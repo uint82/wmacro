@@ -1,17 +1,20 @@
-use wmacro_core_types::{
-    BTN_LEFT_CODE, BTN_MIDDLE_CODE, BTN_RIGHT_CODE, HardwareEvent, HardwareEventKind, HotkeyEvent,
-    MacroButton,
-};
+//! watches for input devices via inotify and reads them with evdev, translating input into `HardwareEvent`s and detecting taps, drags, and hotkeys.
+
 use evdev::{AbsoluteAxisType, Device, InputEventKind, Key, RelativeAxisType};
 use inotify::{Inotify, WatchMask};
 use log::{error, info, warn};
 use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use wmacro_core_types::{
+    BTN_LEFT_CODE, BTN_MIDDLE_CODE, BTN_RIGHT_CODE, HardwareEvent, HardwareEventKind, HotkeyEvent,
+    MacroButton,
+};
 
+// a quick, still press is a tap; anything slower or shakier is a drag.
 const TAP_MAX_DURATION: Duration = Duration::from_millis(200);
 const TAP_MAX_DISPLACEMENT: i32 = 20;
 const INOTIFY_TOKEN: u64 = u64::MAX;
@@ -54,8 +57,16 @@ impl TapState {
     }
 
     fn displacement(&self) -> i32 {
-        let dx = self.last_x.zip(self.start_x).map(|(l, s)| (l - s).abs()).unwrap_or(0);
-        let dy = self.last_y.zip(self.start_y).map(|(l, s)| (l - s).abs()).unwrap_or(0);
+        let dx = self
+            .last_x
+            .zip(self.start_x)
+            .map(|(l, s)| (l - s).abs())
+            .unwrap_or(0);
+        let dy = self
+            .last_y
+            .zip(self.start_y)
+            .map(|(l, s)| (l - s).abs())
+            .unwrap_or(0);
         dx.max(dy)
     }
 
@@ -64,7 +75,10 @@ impl TapState {
             return None;
         }
         self.is_dragging = false;
-        let _ = tx_hotkey.send(HotkeyEvent { code: BTN_LEFT_CODE, pressed: false });
+        let _ = tx_hotkey.send(HotkeyEvent {
+            code: BTN_LEFT_CODE,
+            pressed: false,
+        });
         Some(HardwareEventKind::MouseUp(MacroButton::Left))
     }
 
@@ -79,12 +93,15 @@ impl TapState {
         self.last_x = None;
         self.last_y = None;
 
-        if let Some(last_tap) = self.last_tap_time {
-            if hw_time.duration_since(last_tap).unwrap_or_default() <= TAP_MAX_DURATION {
-                self.is_dragging = true;
-                let _ = tx_hotkey.send(HotkeyEvent { code: BTN_LEFT_CODE, pressed: true });
-                return Some(HardwareEventKind::MouseDown(MacroButton::Left));
-            }
+        if let Some(last_tap) = self.last_tap_time
+            && hw_time.duration_since(last_tap).unwrap_or_default() <= TAP_MAX_DURATION
+        {
+            self.is_dragging = true;
+            let _ = tx_hotkey.send(HotkeyEvent {
+                code: BTN_LEFT_CODE,
+                pressed: true,
+            });
+            return Some(HardwareEventKind::MouseDown(MacroButton::Left));
         }
         None
     }
@@ -98,23 +115,34 @@ impl TapState {
         if self.is_dragging {
             self.is_dragging = false;
             self.touch_down_time = None;
-            let _ = tx_hotkey.send(HotkeyEvent { code: BTN_LEFT_CODE, pressed: false });
+            let _ = tx_hotkey.send(HotkeyEvent {
+                code: BTN_LEFT_CODE,
+                pressed: false,
+            });
             return Some(HardwareEventKind::MouseUp(MacroButton::Left));
         }
 
-        let elapsed = self.touch_down_time.and_then(|t| hw_time.duration_since(t).ok());
+        let elapsed = self
+            .touch_down_time
+            .and_then(|t| hw_time.duration_since(t).ok());
         let displacement = self.displacement();
 
         let mut return_event = None;
 
         if let Some(el) = elapsed {
             if el <= TAP_MAX_DURATION && displacement <= TAP_MAX_DISPLACEMENT {
-                let _ = tx_hotkey.send(HotkeyEvent { code: BTN_LEFT_CODE, pressed: true });
+                let _ = tx_hotkey.send(HotkeyEvent {
+                    code: BTN_LEFT_CODE,
+                    pressed: true,
+                });
                 let _ = tx.send(HardwareEvent {
                     hardware_time: hw_time,
                     kind: HardwareEventKind::MouseDown(MacroButton::Left),
                 });
-                let _ = tx_hotkey.send(HotkeyEvent { code: BTN_LEFT_CODE, pressed: false });
+                let _ = tx_hotkey.send(HotkeyEvent {
+                    code: BTN_LEFT_CODE,
+                    pressed: false,
+                });
 
                 return_event = Some(HardwareEventKind::MouseUp(MacroButton::Left));
                 self.last_tap_time = Some(hw_time);
@@ -129,12 +157,12 @@ impl TapState {
 }
 
 fn is_supported_device(d: &Device) -> bool {
-    d.supported_keys().map_or(false, |keys| {
-        keys.contains(Key::KEY_A) || keys.contains(Key::BTN_LEFT)
-    }) || d.supported_relative_axes()
-        .map_or(false, |axes| axes.contains(RelativeAxisType::REL_X))
-       || d.supported_absolute_axes()
-        .map_or(false, |axes| axes.contains(AbsoluteAxisType::ABS_X))
+    d.supported_keys()
+        .is_some_and(|keys| keys.contains(Key::KEY_A) || keys.contains(Key::BTN_LEFT))
+        || d.supported_relative_axes()
+            .is_some_and(|axes| axes.contains(RelativeAxisType::REL_X))
+        || d.supported_absolute_axes()
+            .is_some_and(|axes| axes.contains(AbsoluteAxisType::ABS_X))
 }
 
 fn register_epoll_fd(epfd: i32, fd: i32, token: u64) -> std::io::Result<()> {
@@ -185,7 +213,10 @@ fn run_listener_loop(
             }
         }
     }
-    info!("Lightweight kernel listener active on {} devices.", devices.len());
+    info!(
+        "Lightweight kernel listener active on {} devices.",
+        devices.len()
+    );
 
     let mut inotify = Inotify::init()?;
     inotify.watches().add("/dev/input", WatchMask::CREATE)?;
@@ -194,6 +225,7 @@ fn run_listener_loop(
     let mut events = vec![libc::epoll_event { events: 0, u64: 0 }; 64];
     let mut inotify_buf = [0u8; 4096];
 
+    // TODO: wake the epoll loop from stop via eventfd instead of the 100ms timeout poll.
     while !stop_flag.load(Ordering::SeqCst) {
         let n = unsafe {
             libc::epoll_wait(
@@ -206,18 +238,27 @@ fn run_listener_loop(
 
         if n < 0 {
             let err = std::io::Error::last_os_error();
-            if err.kind() == std::io::ErrorKind::Interrupted { continue; }
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
             return Err(err);
         }
 
-        for i in 0..(n as usize) {
-            let token = events[i].u64;
+        for ev in &events[..n as usize] {
+            let token = ev.u64;
 
             if token == INOTIFY_TOKEN {
                 handle_inotify_events(&mut inotify, &mut inotify_buf[..], epfd.0, &mut devices);
             } else {
                 let fd = token as i32;
-                if !process_device_events(fd, epfd.0, &mut devices, &mut tap_states, &tx, &tx_hotkey) {
+                if !process_device_events(
+                    fd,
+                    epfd.0,
+                    &mut devices,
+                    &mut tap_states,
+                    &tx,
+                    &tx_hotkey,
+                ) {
                     return Ok(());
                 }
             }
@@ -253,6 +294,8 @@ fn handle_inotify_events(
 
         let path = format!("/dev/input/{}", name_str);
 
+        // TODO: retry the open with a short backoff instead of a fixed 100ms
+        // sleep; udev may still be settling the device.
         std::thread::sleep(std::time::Duration::from_millis(100));
 
         let device = match evdev::Device::open(&path) {
@@ -264,7 +307,10 @@ fn handle_inotify_events(
         };
 
         if !is_supported_device(&device) {
-            warn!("Hotplug: Device {} opened, but is not a supported mouse/keyboard.", path);
+            warn!(
+                "Hotplug: Device {} opened, but is not a supported mouse/keyboard.",
+                path
+            );
             continue;
         }
 
@@ -306,9 +352,7 @@ fn process_device_events(
                             handle_key_event(key, val, hw_time, ts, tx, tx_hotkey)
                         }
                         InputEventKind::RelAxis(axis) => handle_rel_axis(axis, val),
-                        InputEventKind::AbsAxis(axis) => {
-                            handle_abs_axis(axis, val, ts, tx_hotkey)
-                        }
+                        InputEventKind::AbsAxis(axis) => handle_abs_axis(axis, val, ts, tx_hotkey),
                         _ => None,
                     };
 
@@ -374,11 +418,17 @@ fn handle_key_event(
             let code = k.code();
             match val {
                 1 => {
-                    let _ = tx_hotkey.send(HotkeyEvent { code, pressed: true });
+                    let _ = tx_hotkey.send(HotkeyEvent {
+                        code,
+                        pressed: true,
+                    });
                     Some(HardwareEventKind::KeyDown(format!("{:?}", k), code))
                 }
                 0 => {
-                    let _ = tx_hotkey.send(HotkeyEvent { code, pressed: false });
+                    let _ = tx_hotkey.send(HotkeyEvent {
+                        code,
+                        pressed: false,
+                    });
                     Some(HardwareEventKind::KeyUp(format!("{:?}", k), code))
                 }
                 _ => None,
@@ -441,4 +491,3 @@ fn dispatch_mouse_btn(
         _ => None,
     }
 }
-

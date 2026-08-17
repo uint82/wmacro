@@ -1,7 +1,9 @@
-use wmacro_core_types::{ClickButton, ClickType};
+//! creates a uinput virtual device and injects synthetic key, button, scroll, and pointer events.
+
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::io::AsRawFd;
+use wmacro_core_types::{ClickButton, ClickType};
 
 const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
@@ -59,7 +61,7 @@ struct UinputAbsSetup {
 }
 
 // TODO: tv_sec and tv_usec are strictly i64 here, which perfectly aligns
-// for 64-bit Linux. On 32-bit Linux (like older Raspberry Pis), this struct
+// for 64-bit Linux. on 32-bit Linux (like older Raspberry Pis), this struct
 // layout will be incorrect and will corrupt kernel messages.
 #[repr(C)]
 struct InputEvent {
@@ -84,12 +86,16 @@ fn detect_screen_bounds() -> (i32, i32) {
         return b;
     }
 
+    // TODO: cross-check the detected bounds against a real compositor before trusting them.
     log::warn!("Screen detection failed across all backends, falling back to 1920x1080");
     (1920, 1080)
 }
 
 fn try_hyprctl() -> Option<(i32, i32)> {
-    let out = std::process::Command::new("hyprctl").args(["monitors", "-j"]).output().ok()?;
+    let out = std::process::Command::new("hyprctl")
+        .args(["monitors", "-j"])
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -121,7 +127,10 @@ fn try_hyprctl() -> Option<(i32, i32)> {
 }
 
 fn try_xrandr() -> Option<(i32, i32)> {
-    let out = std::process::Command::new("xrandr").arg("--query").output().ok()?;
+    let out = std::process::Command::new("xrandr")
+        .arg("--query")
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -129,20 +138,23 @@ fn try_xrandr() -> Option<(i32, i32)> {
     let text = std::str::from_utf8(&out.stdout).ok()?;
     for line in text.lines().filter(|l| l.contains("current")) {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if let Some(pos) = parts.iter().position(|&w| w == "current") {
-            if parts.len() > pos + 3 {
-                let w: i32 = parts[pos + 1].parse().ok()?;
-                let h: i32 = parts[pos + 3].trim_end_matches(',').parse().ok()?;
-                log::info!("Screen bounds from xrandr: {}x{}", w, h);
-                return Some((w, h));
-            }
+        if let Some(pos) = parts.iter().position(|&w| w == "current")
+            && parts.len() > pos + 3
+        {
+            let w: i32 = parts[pos + 1].parse().ok()?;
+            let h: i32 = parts[pos + 3].trim_end_matches(',').parse().ok()?;
+            log::info!("Screen bounds from xrandr: {}x{}", w, h);
+            return Some((w, h));
         }
     }
     None
 }
 
 fn try_wlr_randr() -> Option<(i32, i32)> {
-    let out = std::process::Command::new("wlr-randr").arg("--json").output().ok()?;
+    let out = std::process::Command::new("wlr-randr")
+        .arg("--json")
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -175,11 +187,11 @@ fn try_drm_sysfs() -> Option<(i32, i32)> {
         let path = entry.path().join("modes");
         if let Ok(content) = std::fs::read_to_string(&path) {
             for line in content.lines() {
-                if let Some((ws, hs)) = line.trim().split_once('x') {
-                    if let (Ok(w), Ok(h)) = (ws.parse::<i32>(), hs.parse::<i32>()) {
-                        max_x = max_x.max(w);
-                        max_y = max_y.max(h);
-                    }
+                if let Some((ws, hs)) = line.trim().split_once('x')
+                    && let (Ok(w), Ok(h)) = (ws.parse::<i32>(), hs.parse::<i32>())
+                {
+                    max_x = max_x.max(w);
+                    max_y = max_y.max(h);
                 }
             }
         }
@@ -201,7 +213,9 @@ fn json_i32(obj: &str, key: &str) -> Option<i32> {
     let needle = format!("\"{}\":", key);
     let start = obj.find(&needle)? + needle.len();
     let rest = obj[start..].trim_start();
-    let end = rest.find(|c: char| !c.is_ascii_digit() && c != '-').unwrap_or(rest.len());
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '-')
+        .unwrap_or(rest.len());
     rest[..end].parse().ok()
 }
 
@@ -209,7 +223,9 @@ fn json_f32(obj: &str, key: &str) -> Option<f32> {
     let needle = format!("\"{}\":", key);
     let start = obj.find(&needle)? + needle.len();
     let rest = obj[start..].trim_start();
-    let end = rest.find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-').unwrap_or(rest.len());
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+        .unwrap_or(rest.len());
     rest[..end].parse().ok()
 }
 
@@ -346,7 +362,10 @@ impl UinputBackend {
 
     pub fn key_down(&mut self, key: &str, code: u16) -> Result<(), String> {
         if code == 0 {
-            log::warn!("Key '{}' recorded with code 0 (KEY_RESERVED), skipping", key);
+            log::warn!(
+                "Key '{}' recorded with code 0 (KEY_RESERVED), skipping",
+                key
+            );
             return Ok(());
         }
         self.write_event(EV_KEY, code, 1)?;
@@ -355,7 +374,10 @@ impl UinputBackend {
 
     pub fn key_up(&mut self, key: &str, code: u16) -> Result<(), String> {
         if code == 0 {
-            log::warn!("Key '{}' recorded with code 0 (KEY_RESERVED), skipping", key);
+            log::warn!(
+                "Key '{}' recorded with code 0 (KEY_RESERVED), skipping",
+                key
+            );
             return Ok(());
         }
         self.write_event(EV_KEY, code, 0)?;
@@ -366,8 +388,6 @@ impl UinputBackend {
         &mut self,
         target_x: i32,
         target_y: i32,
-        _current_x: i32,
-        _current_y: i32,
         button: &ClickButton,
         click_type: &ClickType,
         hold_duration_ms: u64,
@@ -428,8 +448,12 @@ unsafe fn setup_device_capabilities(fd: i32, max_x: i32, max_y: i32) -> Result<(
         let abs = UinputAbsSetup {
             code,
             absinfo: InputAbsinfo {
-                value: 0, minimum: 0, maximum: max_val - 1,
-                fuzz: 0, flat: 0, resolution: 0,
+                value: 0,
+                minimum: 0,
+                maximum: max_val - 1,
+                fuzz: 0,
+                flat: 0,
+                resolution: 0,
             },
         };
         unsafe { ioctl_ptr(fd, UI_ABS_SETUP, &abs) }
@@ -445,8 +469,8 @@ unsafe fn enable_keyboard_keys(fd: i32) -> Result<(), String> {
     let keys = [
         1u32, 14, 15, 28, 29, 42, 54, 56, 57, 58, 69, 70, 97, 99, 100, 102, 103, 104, 105, 106,
         107, 108, 109, 110, 111, 114, 119, 125, 126, 12, 13, 26, 27, 39, 40, 41, 43, 51, 52, 53,
-        55, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 98, 30, 48, 46, 32, 18, 33, 34,
-        35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44,
+        55, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 98, 30, 48, 46, 32, 18, 33, 34, 35,
+        23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44,
     ];
 
     unsafe {
@@ -463,7 +487,7 @@ unsafe fn enable_keyboard_keys(fd: i32) -> Result<(), String> {
 unsafe fn create_uinput_device(fd: i32, device_name: &[u8]) -> Result<(), String> {
     unsafe {
         let mut setup: UinputSetup = std::mem::zeroed();
-        setup.id.bustype = 0x03; // BUS_USB
+        setup.id.bustype = 0x03; // BUS_USB, so the compositor recognizes us as a plain USB peripheral.
         setup.id.vendor = 0x1234;
         setup.id.product = 0x5678;
         setup.id.version = 1;
@@ -481,23 +505,35 @@ fn wait_for_device_registration(device_name: &str) {
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_millis(1000);
     let poll_interval = std::time::Duration::from_millis(10);
+    // TODO: retry with exponential backoff instead of a fixed poll interval.
 
     loop {
         if start.elapsed() > timeout {
-            log::warn!("Timed out waiting for uinput device '{}'. Early events may be dropped.", device_name);
+            log::warn!(
+                "Timed out waiting for uinput device '{}'. Early events may be dropped.",
+                device_name
+            );
             break;
         }
 
-        if let Ok(output) = std::process::Command::new("hyprctl").args(["devices", "-j"]).output() {
-            if let Ok(json) = std::str::from_utf8(&output.stdout) {
-                if json.contains(device_name) {
-                    log::info!("Compositor registered device in {}ms", start.elapsed().as_millis());
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    return;
-                }
+        if let Ok(output) = std::process::Command::new("hyprctl")
+            .args(["devices", "-j"])
+            .output()
+        {
+            if let Ok(json) = std::str::from_utf8(&output.stdout)
+                && json.contains(device_name)
+            {
+                log::info!(
+                    "Compositor registered device in {}ms",
+                    start.elapsed().as_millis()
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                return;
             }
         } else {
-            log::warn!("hyprctl not available to check device registration, falling back to 200ms sleep.");
+            log::warn!(
+                "hyprctl not available to check device registration, falling back to 200ms sleep."
+            );
             std::thread::sleep(std::time::Duration::from_millis(200));
             return;
         }
@@ -509,7 +545,11 @@ fn wait_for_device_registration(device_name: &str) {
 unsafe fn ioctl_val(fd: i32, request: u64, val: i32) -> Result<(), String> {
     let ret = unsafe { libc::ioctl(fd, request as std::os::raw::c_ulong, val) };
     if ret < 0 {
-        Err(format!("ioctl_val({:#x}): {}", request, std::io::Error::last_os_error()))
+        Err(format!(
+            "ioctl_val({:#x}): {}",
+            request,
+            std::io::Error::last_os_error()
+        ))
     } else {
         Ok(())
     }
@@ -518,7 +558,11 @@ unsafe fn ioctl_val(fd: i32, request: u64, val: i32) -> Result<(), String> {
 unsafe fn ioctl_ptr<T>(fd: i32, request: u64, ptr: *const T) -> Result<(), String> {
     let ret = unsafe { libc::ioctl(fd, request as std::os::raw::c_ulong, ptr) };
     if ret < 0 {
-        Err(format!("ioctl_ptr({:#x}): {}", request, std::io::Error::last_os_error()))
+        Err(format!(
+            "ioctl_ptr({:#x}): {}",
+            request,
+            std::io::Error::last_os_error()
+        ))
     } else {
         Ok(())
     }

@@ -1,3 +1,5 @@
+//! tuning constants for the humanized mouse movement model.
+
 pub const OVERSHOOT_PROBABILITY_MEDIUM: f32 = 0.20;
 pub const OVERSHOOT_PROBABILITY_LONG: f32 = 0.35;
 pub const OVERSHOOT_MAX_DIST: f32 = 12.0;
