@@ -1,25 +1,4 @@
-//! screen capture backend.
-//!
-//! stack:
-//! xdg-desktop-portal ScreenCast -> PipeWire stream -> DMABuf -> gbm CPU
-//! readback. regions are cropped client-side from the captured output, which
-//! keeps it portable across compositors (KDE, GNOME, Hyprland, Wayfire, ...).
-//!
-//! layout:
-//! - [`portal`] - ScreenCast session, restore-token persistence, output matching
-//! - [`stream`] - PipeWire stream, format negotiation, capture thread
-//! - [`gbm`] - CPU readback of dma-bufs (see its TODO for the planned
-//!   EGL/GL readback path)
-//! - [`state`] - pending requests and the retained-frame serve path
-//! - [`pixel`] - format mapping and luma conversion
-//!
-//! the portal session uses a persistent restore token ("wmacro"), so after the
-//! first grant no permission dialog is shown. frames are copied inside the
-//! PipeWire `process` callback while the buffer is still alive; the copy is
-//! only made when at least one capture request is pending (copy-on-demand),
-//! and only the bounding box of the requested regions is read back from the
-//! dma-buf (region readback) instead of the whole screen.
-
+mod blob;
 mod gbm;
 mod pixel;
 mod portal;
@@ -31,10 +10,10 @@ mod tests;
 
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use ashpd::desktop::screencast::{
     CursorMode, Screencast, SelectSourcesOptions, SourceType, StartCastOptions,
 };
@@ -42,7 +21,7 @@ use ashpd::desktop::{PersistMode, Session};
 use image::{DynamicImage, GrayImage, RgbaImage};
 use once_cell::sync::Lazy;
 
-use super::outputs::{query_outputs, OutputInfo};
+use super::outputs::{OutputInfo, query_outputs};
 
 use gbm::GbmSession;
 use portal::{load_restore_token, match_output, save_restore_token};
@@ -53,21 +32,26 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const RETRY_COOLDOWN: Duration = Duration::from_secs(10);
 const PORTAL_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// logical position of an output on the desktop, in surface (logical) pixels.
+/// tile captured around a pixel that misses the retained fast path, and the retained-frame freshness bound.
+const PIXEL_TILE_SIZE: i32 = 32;
+const PIXEL_TILE_MARGIN: i32 = PIXEL_TILE_SIZE / 2;
+const PIXEL_FRESHNESS_TTL: Duration = Duration::from_millis(100);
+
 pub(crate) type ScreenPos = (i32, i32);
-/// logical size of an output, in surface (logical) pixels.
 pub(crate) type ScreenSize = (u32, u32);
 
 pub struct Capturer {
     requests: mpsc::Sender<state::CaptureRequest>,
 
-    /// write end of the self-pipe that wakes the capture loop on new requests.
     wake: OwnedFd,
 
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
     session: Option<Session<Screencast>>,
     output: OutputInfo,
+
+    /// shared with the capture thread; the pixel fast path reads it directly.
+    state: Arc<Mutex<state::CaptureState>>,
 }
 
 impl Capturer {
@@ -186,7 +170,9 @@ impl Capturer {
         let thread_stop = stop.clone();
         let thread_state = state.clone();
         let thread = std::thread::spawn(move || {
-            if let Err(e) = pw_capture_thread(fd, gbm, node_id, rx, wake_rfd, thread_stop, thread_state) {
+            if let Err(e) =
+                pw_capture_thread(fd, gbm, node_id, rx, wake_rfd, thread_stop, thread_state)
+            {
                 log::error!("capture thread failed: {e:#}");
             }
         });
@@ -198,11 +184,16 @@ impl Capturer {
             thread: Some(thread),
             session: Some(session),
             output,
+            state,
         })
     }
 
     pub fn output(&self) -> &OutputInfo {
         &self.output
+    }
+
+    fn state(&self) -> &Arc<Mutex<state::CaptureState>> {
+        &self.state
     }
 
     pub fn is_dead(&self) -> bool {
@@ -234,7 +225,11 @@ impl Capturer {
             .context("capture thread is not running")?;
         let byte = [1u8];
         unsafe {
-            libc::write(self.wake.as_raw_fd(), byte.as_ptr() as *const libc::c_void, 1);
+            libc::write(
+                self.wake.as_raw_fd(),
+                byte.as_ptr() as *const libc::c_void,
+                1,
+            );
         }
         match rx.recv_timeout(REQUEST_TIMEOUT) {
             Ok(Ok(img)) => Ok(img),
@@ -271,7 +266,6 @@ impl Drop for Capturer {
     }
 }
 
-
 static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -285,16 +279,18 @@ struct GlobalBackend {
     last_attempt: Option<Instant>,
 }
 
-static GLOBAL_CAPTURER: Lazy<Mutex<GlobalBackend>> =
-    Lazy::new(|| Mutex::new(GlobalBackend { capturer: None, last_attempt: None }));
+static GLOBAL_CAPTURER: Lazy<Mutex<GlobalBackend>> = Lazy::new(|| {
+    Mutex::new(GlobalBackend {
+        capturer: None,
+        last_attempt: None,
+    })
+});
 
 fn global_capturer() -> Result<MutexGuard<'static, GlobalBackend>> {
     let mut g = GLOBAL_CAPTURER
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let cooldown_ok = g
-        .last_attempt
-        .is_none_or(|t| t.elapsed() > RETRY_COOLDOWN);
+    let cooldown_ok = g.last_attempt.is_none_or(|t| t.elapsed() > RETRY_COOLDOWN);
     if g.capturer.as_ref().is_some_and(|c| c.is_dead()) {
         log::warn!("capture backend thread has exited; restarting");
         g.capturer = None;
@@ -319,25 +315,182 @@ pub(crate) fn capture_screen_native() -> Result<GrayImage> {
     c.capture_all()
 }
 
-pub(crate) fn capture_region_native(left: i32, top: i32, width: i32, height: i32) -> Result<GrayImage> {
+pub(crate) fn capture_region_native(
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+) -> Result<GrayImage> {
     let g = global_capturer()?;
     let c = g.capturer.as_ref().context("capture backend unavailable")?;
     c.capture_region(left, top, width, height)
 }
 
-pub(crate) fn capture_region_color_native(
-    left: i32,
-    top: i32,
-    width: i32,
-    height: i32,
-) -> Result<RgbaImage> {
-    let g = global_capturer()?;
-    let c = g.capturer.as_ref().context("capture backend unavailable")?;
-    c.capture_region_color(left, top, width, height)
+/// toggles continuous capture: while set, every arriving frame is read into
+/// the retained buffer so pixel reads during macro playback skip the request
+/// roundtrip. no-op while the backend is unavailable.
+pub(crate) fn set_capture_continuous(on: bool) {
+    let Ok(g) = GLOBAL_CAPTURER.lock() else {
+        return;
+    };
+    if let Some(c) = g.capturer.as_ref() {
+        c.state().lock().unwrap().continuous = on;
+    }
 }
 
-/// full-output color snapshot plus the output's logical position and size,
-/// used by the frozen-screen selection overlay.
+/// single-pixel RGB read used by the if-pixel-color condition: served from
+/// the retained buffer when it covers `(x, y)` and is younger than
+/// [`PIXEL_FRESHNESS_TTL`], else a fresh [`PIXEL_TILE_SIZE`] tile request.
+pub(crate) fn capture_pixel_color(x: i32, y: i32) -> Result<(u8, u8, u8)> {
+    let g = global_capturer()?;
+    let c = g.capturer.as_ref().context("capture backend unavailable")?;
+
+    let s = c.state().lock().unwrap();
+    if s.retained_at
+        .is_some_and(|t| t.elapsed() < PIXEL_FRESHNESS_TTL)
+        && let Some(px) = state::retained_pixel(&s, x, y)
+    {
+        return Ok(px);
+    }
+    drop(s);
+
+    let ox = (x - PIXEL_TILE_MARGIN).max(0);
+    let oy = (y - PIXEL_TILE_MARGIN).max(0);
+    let img = c.capture_region_color(ox, oy, PIXEL_TILE_SIZE, PIXEL_TILE_SIZE)?;
+    let lx = (x - ox) as u32;
+    let ly = (y - oy) as u32;
+    if lx < img.width() && ly < img.height() {
+        let p = img.get_pixel(lx, ly);
+        Ok((p[0], p[1], p[2]))
+    } else {
+        bail!("pixel ({x}, {y}) is outside the captured region")
+    }
+}
+
+/// whether a color-region scan could be answered from the retained buffer.
+enum RetainedScan {
+    /// the scan ran; the found region's center and size `(cx, cy, w, h)` in logical coordinates if one qualified.
+    Done(Option<(i32, i32, u32, u32)>),
+    /// the retained buffer was stale or did not fully cover the region.
+    Refresh,
+}
+
+/// finds the largest connected region of pixels within `tolerance` (0-100,
+/// euclidean RGB distance) of (r, g, b) in `region` (global logical
+/// coordinates; None = the whole output), ignoring regions narrower than
+/// `min_width` or shorter than `min_height`; returns its center and size.
+///
+/// scans the retained buffer directly when fresh and fully covering, else
+/// forces a fresh frame readback so the reply and scan agree on the geometry.
+pub(crate) fn capture_color_region(
+    region: Option<(i32, i32, i32, i32)>,
+    r: u8,
+    g: u8,
+    b: u8,
+    tolerance: u8,
+    min_width: u32,
+    min_height: u32,
+) -> Result<Option<(i32, i32, u32, u32)>> {
+    let guard = global_capturer()?;
+    let c = guard
+        .capturer
+        .as_ref()
+        .context("capture backend unavailable")?;
+
+    let (x, y, w, h) = match region {
+        Some(r) => r,
+        None => {
+            let (px, py) = c.output().pos;
+            let (pw, ph) = c.output().size;
+            (px, py, pw as i32, ph as i32)
+        }
+    };
+
+    if let RetainedScan::Done(found) = scan_color_region_from_retained(
+        c, x, y, w, h, r, g, b, tolerance, min_width, min_height, true,
+    )? {
+        return Ok(found);
+    }
+
+    // slow path: the retained buffer was stale or did not cover the region; retry once in case a concurrent request replaced it.
+    for _ in 0..2 {
+        c.capture_region_color(x, y, w, h)?;
+        if let RetainedScan::Done(found) = scan_color_region_from_retained(
+            c, x, y, w, h, r, g, b, tolerance, min_width, min_height, false,
+        )? {
+            return Ok(found);
+        }
+    }
+    Ok(None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scan_color_region_from_retained(
+    c: &Capturer,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    r: u8,
+    g: u8,
+    b: u8,
+    tolerance: u8,
+    min_width: u32,
+    min_height: u32,
+    require_fresh: bool,
+) -> Result<RetainedScan> {
+    let s = c.state().lock().unwrap();
+    if require_fresh
+        && !s
+            .retained_at
+            .is_some_and(|t| t.elapsed() < PIXEL_FRESHNESS_TTL)
+    {
+        return Ok(RetainedScan::Refresh);
+    }
+    let Some((vx0, vy0, vx1, vy1)) = state::visible_region_rect(&s, x, y, w, h) else {
+        return Ok(RetainedScan::Done(None)); // region fully outside the output.
+    };
+    if !state::retained_rect_covered(&s, vx0, vy0, vx1, vy1) {
+        return Ok(RetainedScan::Refresh);
+    }
+    let (snap, sw, sh) = state::retained_snapshot(&s, vx0, vy0, vx1, vy1);
+    let fmt = s.retained_fmt;
+    drop(s);
+
+    let Some(region) = blob::largest_color_region(
+        &snap,
+        sw as usize * 4,
+        sw,
+        sh,
+        fmt,
+        r,
+        g,
+        b,
+        tolerance,
+        min_width,
+        min_height,
+    ) else {
+        return Ok(RetainedScan::Done(None)); // scanned, nothing large enough.
+    };
+
+    // center and bounding box: snapshot local -> frame -> global logical.
+    let s = c.state().lock().unwrap();
+    let center = state::frame_to_logical(
+        &s,
+        vx0 + region.cx.round() as i64,
+        vy0 + region.cy.round() as i64,
+    );
+    let p0 = state::frame_to_logical(&s, vx0 + i64::from(region.x0), vy0 + i64::from(region.y0));
+    let p1 = state::frame_to_logical(&s, vx0 + i64::from(region.x1), vy0 + i64::from(region.y1));
+    Ok(RetainedScan::Done(match (center, p0, p1) {
+        (Some((cx, cy)), Some((x0, y0)), Some((x1, y1))) => {
+            Some((cx, cy, (x1 - x0 + 1) as u32, (y1 - y0 + 1) as u32))
+        }
+        _ => None,
+    }))
+}
+
+/// full-output color snapshot plus the output's logical position and size, for the frozen-screen selection overlay.
 pub(crate) fn capture_output_color() -> Result<(RgbaImage, ScreenPos, ScreenSize)> {
     let g = global_capturer()?;
     let c = g.capturer.as_ref().context("capture backend unavailable")?;

@@ -1,26 +1,13 @@
-//! frozen-screen region selector used by the if-image capture flow. captures a
-//! color snapshot of the captured output, switches the window to fullscreen,
-//! and lets the user drag a region on the frozen image. the snapshot is taken
-//! before the overlay appears, so the screen cannot change underneath the
-//! selection.
-//!
-//! TODO(multi-output): only the portal-matched output is captured, so a target
-//! on another monitor is not selectable. enumerate `query_outputs()` and let
-//! the user switch which output is frozen.
-//! TODO(hide-window): the app window itself appears in the snapshot whenever
-//! it overlaps the target. Wayland has no client-initiated unminimize, so
-//! hiding before the capture needs compositor-specific support (e.g. Hyprland
-//! layer-shell or a window rule).
+// TODO(multi-output): only the portal-matched output is captured; enumerate `query_outputs()` and let the user switch the frozen output.
+// TODO(hide-window): the app window appears in the snapshot when overlapping the target; hiding it needs compositor-specific support (e.g. Hyprland layer-shell or a window rule).
 
 use crate::image_utils::capture::capture_output_color;
 use eframe::egui;
 use image::RgbaImage;
 
-/// what the captured region is used for; decides how the open modal consumes
-/// the outcome.
+/// what the captured region is used for; decides how the open modal consumes the outcome.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PickerTarget {
-
     /// crop of the frozen frame saved as the if-image target png.
     TargetImage,
 
@@ -49,13 +36,11 @@ pub struct ScreenPicker {
     drag_cur: Option<egui::Pos2>,
 }
 
-/// minimum selection size in image pixels; smaller drags are treated as a
-/// miss.
+/// minimum selection size in image pixels; smaller drags are a miss.
 const MIN_SELECT: f32 = 2.0;
 
 impl ScreenPicker {
-    /// captures a full-output color snapshot and switches the window to
-    /// fullscreen so the frozen frame covers the screen.
+    /// captures a full-output color snapshot and switches the window to fullscreen.
     pub fn freeze(target: PickerTarget, ctx: &egui::Context) -> anyhow::Result<Self> {
         let (image, output_pos, output_size) = capture_output_color()?;
         if image.width() == 0 || image.height() == 0 {
@@ -92,7 +77,6 @@ impl ScreenPicker {
         })
     }
 
-    /// logical pixels per image pixel (handles fractional scale).
     fn logical_scale(&self) -> (f32, f32) {
         (
             self.output_size.0 as f32 / self.image.width() as f32,
@@ -100,7 +84,6 @@ impl ScreenPicker {
         )
     }
 
-    /// screen rect the frozen image is drawn into (contain-fit, centered).
     fn draw_rect(&self, screen: egui::Rect) -> egui::Rect {
         let (sx, sy) = self.logical_scale();
         let (lw, lh) = (
@@ -108,10 +91,7 @@ impl ScreenPicker {
             self.image.height() as f32 * sy,
         );
         let zoom = (screen.width() / lw).min(screen.height() / lh);
-        egui::Rect::from_center_size(
-            screen.center(),
-            egui::vec2(lw * zoom, lh * zoom),
-        )
+        egui::Rect::from_center_size(screen.center(), egui::vec2(lw * zoom, lh * zoom))
     }
 
     /// pointer position -> image pixel coords, `None` when outside the image.
@@ -122,7 +102,10 @@ impl ScreenPicker {
             rect.height() / self.image.height() as f32,
         );
         let (ix, iy) = ((pos.x - rect.min.x) / dx, (pos.y - rect.min.y) / dy);
-        if ix < 0.0 || iy < 0.0 || ix >= self.image.width() as f32 || iy >= self.image.height() as f32
+        if ix < 0.0
+            || iy < 0.0
+            || ix >= self.image.width() as f32
+            || iy >= self.image.height() as f32
         {
             None
         } else {
@@ -130,7 +113,6 @@ impl ScreenPicker {
         }
     }
 
-    /// image-pixel rect -> global logical rect (rounded to integers).
     fn image_rect_to_logical(&self, r: egui::Rect) -> (i32, i32, i32, i32) {
         let (sx, sy) = self.logical_scale();
         (
@@ -141,7 +123,6 @@ impl ScreenPicker {
         )
     }
 
-    /// image-pixel rect -> screen rect (for drawing the drag overlay).
     fn image_rect_to_screen(&self, screen: egui::Rect, r: egui::Rect) -> egui::Rect {
         let rect = self.draw_rect(screen);
         let (dx, dy) = (
@@ -154,7 +135,6 @@ impl ScreenPicker {
         )
     }
 
-    /// builds a region outcome from the current drag, `None` when too small.
     fn region_from_drag(&self) -> Option<PickerOutcome> {
         let (a, b) = (self.drag_start?, self.drag_cur?);
         let ir = egui::Rect::from_two_pos(a, b);
@@ -173,8 +153,7 @@ impl ScreenPicker {
         Some(PickerOutcome::Region { x, y, w, h, image })
     }
 
-    /// draws the in-progress drag selection (translucent fill, outline, size
-    /// label) mapped back onto the frozen image.
+    /// draws the in-progress drag selection (translucent fill, outline, size label) mapped onto the frozen image.
     fn draw_drag_selection(&self, painter: &egui::Painter, screen: egui::Rect, ir: egui::Rect) {
         let sr = self.image_rect_to_screen(screen, ir);
         painter.rect_filled(
@@ -227,8 +206,7 @@ pub fn new_capture_path() -> String {
     )
 }
 
-/// renders the frozen overlay; returns the outcome once the selection is
-/// finished (or cancelled).
+/// renders the frozen overlay; returns the outcome once the selection is finished (or cancelled).
 pub fn render_picker(ctx: &egui::Context, picker: &mut ScreenPicker) -> Option<PickerOutcome> {
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         return Some(PickerOutcome::Cancelled);
@@ -292,9 +270,10 @@ pub fn render_picker(ctx: &egui::Context, picker: &mut ScreenPicker) -> Option<P
                 egui::Color32::WHITE,
             );
 
-            let cancel_rect =
-                egui::Rect::from_min_size(screen.right_top() + egui::vec2(-120.0, 12.0),
-                    egui::vec2(108.0, 30.0));
+            let cancel_rect = egui::Rect::from_min_size(
+                screen.right_top() + egui::vec2(-120.0, 12.0),
+                egui::vec2(108.0, 30.0),
+            );
             if ui.put(cancel_rect, egui::Button::new("Cancel")).clicked() {
                 outcome = Some(PickerOutcome::Cancelled);
             }

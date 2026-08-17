@@ -1,6 +1,6 @@
-use wmacro_core_types::Macro;
 use std::fs;
 use std::path::{Path, PathBuf};
+use wmacro_core_types::Macro;
 
 pub fn default_macro_dir() -> PathBuf {
     let base_dir = directories::ProjectDirs::from("", "", "wmacro")

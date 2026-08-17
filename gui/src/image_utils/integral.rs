@@ -16,7 +16,7 @@ impl IntegralImage {
         let mut sum_sq = vec![0i64; (h + 1) * stride];
         let raw = img.as_raw();
 
-        // row-wise prefix sum (parallel across rows)
+        // row-wise prefix sum (parallel across rows).
         sum.par_chunks_mut(stride)
             .zip(sum_sq.par_chunks_mut(stride))
             .enumerate()
@@ -35,7 +35,7 @@ impl IntegralImage {
                 }
             });
 
-        // column-wise accumulation (cache-friendly linear pass)
+        // column-wise accumulation (cache-friendly linear pass).
         for y in 1..=h {
             let (prev_s, curr_s) = sum.split_at_mut(y * stride);
             let (prev_sq, curr_sq) = sum_sq.split_at_mut(y * stride);

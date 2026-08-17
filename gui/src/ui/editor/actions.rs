@@ -1,7 +1,8 @@
 use super::super::modals::Modal;
 use super::IdeState;
 use crate::state::SharedState;
-use wmacro_core_types::MacroCommand;
+use crate::ui::modals::modal_from_command;
+use wmacro_core_types::{Macro, MacroCommand};
 
 #[derive(Default)]
 pub struct EditorActions {
@@ -16,15 +17,30 @@ pub struct EditorActions {
     pub move_up: bool,
     pub move_down: bool,
     pub move_payload: Option<(Vec<usize>, usize)>,
+    pub edit_selected: bool,
+    pub fold_toggle: Option<usize>,
+    /// row + text committed from the inline editor popup; applied after the rendering lock is released.
+    pub pending_inline_commit: Option<(usize, String)>,
+}
+
+pub fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
+pub fn modal_for_selection(m: &Macro, ide: &IdeState) -> Option<Modal> {
+    let idx = ide.selected.iter().min().copied()?;
+    let cmd = m.commands.get(idx)?;
+    modal_from_command(cmd, idx)
 }
 
 fn deduplicate_label_name(base_name: &str, commands: &[MacroCommand]) -> String {
+    // label targets must stay unique or jumps become ambiguous, so keep appending a counter until the name is free.
     let mut candidate = format!("{}_copy", base_name);
     let mut counter = 1;
     loop {
-        let exists = commands.iter().any(|cmd| {
-            matches!(cmd, MacroCommand::Label(existing) if existing == &candidate)
-        });
+        let exists = commands
+            .iter()
+            .any(|cmd| matches!(cmd, MacroCommand::Label(existing) if existing == &candidate));
         if !exists {
             return candidate;
         }
@@ -45,7 +61,7 @@ fn sorted_indices(ide: &IdeState) -> Vec<usize> {
     idxs
 }
 
-fn handle_move_up(ide: &mut IdeState, commands: &mut [MacroCommand]) {
+pub(crate) fn handle_move_up(ide: &mut IdeState, commands: &mut [MacroCommand]) {
     let idxs = sorted_indices(ide);
     ide.selected.clear();
     for &idx in &idxs {
@@ -56,7 +72,7 @@ fn handle_move_up(ide: &mut IdeState, commands: &mut [MacroCommand]) {
     }
 }
 
-fn handle_move_down(ide: &mut IdeState, commands: &mut [MacroCommand]) {
+pub(crate) fn handle_move_down(ide: &mut IdeState, commands: &mut [MacroCommand]) {
     let mut idxs: Vec<usize> = ide.selected.iter().copied().collect();
     idxs.sort_unstable_by(|a, b| b.cmp(a));
     ide.selected.clear();
@@ -70,6 +86,7 @@ fn handle_move_down(ide: &mut IdeState, commands: &mut [MacroCommand]) {
 }
 
 fn handle_copy(ide: &mut IdeState, commands: &[MacroCommand]) {
+    // TODO: persist the internal clipboard across restarts; right now a copy-paste round trip dies with the app.
     let idxs = sorted_indices(ide);
     ide.clipboard = idxs
         .iter()
@@ -123,10 +140,7 @@ fn handle_move_payload(
     let mut sorted_from = from_indices.to_vec();
     sorted_from.sort_unstable();
 
-    let to_move: Vec<MacroCommand> = sorted_from
-        .iter()
-        .map(|&i| commands[i].clone())
-        .collect();
+    let to_move: Vec<MacroCommand> = sorted_from.iter().map(|&i| commands[i].clone()).collect();
 
     for &i in sorted_from.iter().rev() {
         commands.remove(i);
@@ -143,28 +157,27 @@ fn handle_move_payload(
     }
 }
 
-fn sync_event_count(macro_state: &mut crate::state::MacroState) {
+pub(crate) fn sync_event_count(macro_state: &mut crate::state::MacroState) {
     if let Some(m) = macro_state.current_macro.as_ref() {
         macro_state.events_captured = m.commands.len();
     }
 }
 
-pub fn handle_editor_actions(
-    state: &SharedState,
-    ide: &mut IdeState,
-    actions: &EditorActions,
-) {
+pub fn handle_editor_actions(state: &SharedState, ide: &mut IdeState, actions: &EditorActions) {
+    // action flags are consumed once per frame, after all widgets have voted; this is the single funnel that mutates the macro.
     if actions.deselect_all {
         ide.selected.clear();
     }
 
     if actions.bulk_delay {
         let idxs: Vec<usize> = ide.selected.iter().copied().collect();
-        ide.modal = Modal::Delay {
+        ide.modal = Modal::Widget(Box::new(crate::ui::modals::delay::DelayModal {
             value: 100,
             unit: crate::state::DelayUnit::Milliseconds,
             target_indices: idxs,
-        };
+            duration_text: "100".to_string(),
+            edit_idx: None,
+        }));
     }
 
     let mut s = state.lock().unwrap_or_else(|e| {
@@ -172,63 +185,115 @@ pub fn handle_editor_actions(
         e.into_inner()
     });
 
-    if actions.select_all {
-        if let Some(m) = s.macro_state.current_macro.as_ref() {
-            ide.selected = (0..m.commands.len()).collect();
-        }
+    let mutates = actions.move_up
+        || actions.move_down
+        || actions.duplicate_selected
+        || actions.paste_after.is_some()
+        || actions.paste_end
+        || actions.delete_selected
+        || actions.move_payload.is_some();
+
+    if mutates {
+        s.macro_state.push_undo();
+    }
+
+    if actions.select_all
+        && let Some(m) = s.macro_state.current_macro.as_ref()
+    {
+        ide.selected = (0..m.commands.len()).collect();
+    }
+
+    if actions.edit_selected
+        && let Some(m) = s.macro_state.current_macro.as_ref()
+        && let Some(modal) = modal_for_selection(m, ide)
+    {
+        ide.modal = modal;
+    }
+
+    if let Some(idx) = actions.fold_toggle {
+        super::row::toggle_fold(ide, idx);
     }
 
     if actions.move_up {
         if let Some(m) = s.macro_state.current_macro.as_mut() {
             handle_move_up(ide, &mut m.commands);
         }
+        let moved = ide.selected.len();
+        s.status_msg = format!("Moved {moved} command{} up", plural(moved));
     }
 
     if actions.move_down {
         if let Some(m) = s.macro_state.current_macro.as_mut() {
             handle_move_down(ide, &mut m.commands);
         }
+        let moved = ide.selected.len();
+        s.status_msg = format!("Moved {moved} command{} down", plural(moved));
     }
 
     if actions.copy_selected {
         if let Some(m) = s.macro_state.current_macro.as_ref() {
             handle_copy(ide, &m.commands);
         }
+        let count = ide.clipboard.len();
+        s.status_msg = format!("Copied {count} command{}", plural(count));
     }
 
     if actions.duplicate_selected {
+        let duplicated = ide.selected.len();
         if let Some(m) = s.macro_state.current_macro.as_mut() {
             handle_duplicate(ide, &mut m.commands);
         }
         sync_event_count(&mut s.macro_state);
+        s.status_msg = format!("Duplicated {duplicated} command{}", plural(duplicated));
     }
 
     if let Some(target_idx) = actions.paste_after {
+        let pasted = ide.clipboard.len();
         if let Some(m) = s.macro_state.current_macro.as_mut() {
             handle_paste_at(ide, &mut m.commands, target_idx + 1);
         }
         sync_event_count(&mut s.macro_state);
+        s.status_msg = format!("Pasted {pasted} command{}", plural(pasted));
     }
 
     if actions.paste_end {
+        let pasted = ide.clipboard.len();
         if let Some(m) = s.macro_state.current_macro.as_mut() {
             for cmd in ide.clipboard.iter() {
                 m.commands.push(cmd.clone());
             }
         }
         sync_event_count(&mut s.macro_state);
+        s.status_msg = format!("Pasted {pasted} command{}", plural(pasted));
     }
 
     if actions.delete_selected {
+        let deleted = ide.selected.len();
         if let Some(m) = s.macro_state.current_macro.as_mut() {
             handle_delete(ide, &mut m.commands);
         }
         sync_event_count(&mut s.macro_state);
+        s.status_msg = format!("Deleted {deleted} command{}", plural(deleted));
     }
 
     if let Some((from_indices, to_idx)) = &actions.move_payload {
         if let Some(m) = s.macro_state.current_macro.as_mut() {
             handle_move_payload(ide, &mut m.commands, from_indices, *to_idx);
+        }
+        let moved = from_indices.len();
+        s.status_msg = format!("Moved {moved} command{}", plural(moved));
+    }
+
+    if let Some((row, text)) = actions.pending_inline_commit.as_ref() {
+        s.macro_state.push_undo();
+        if let Some(m) = s.macro_state.current_macro.as_mut()
+            && let Some(cmd) = m.commands.get_mut(*row)
+            && let Some((label, previous)) = super::inline::edit_field(cmd, Some(text))
+            && previous != *text
+        {
+            s.macro_state.events_captured = m.commands.len();
+            s.unsaved_changes = true;
+            s.status_msg = format!("Updated {} → \"{}\"", label, text);
         }
     }
 }

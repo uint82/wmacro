@@ -60,19 +60,22 @@ pub(crate) fn downsample_box(img: &GrayImage, factor: u32) -> GrayImage {
     let out_raw = &mut *out;
     let area = factor * factor;
 
-    out_raw.par_chunks_mut(nw as usize).enumerate().for_each(|(y, out_row)| {
-        let base_y = (y as u32) * factor;
-        for x in 0..nw {
-            let base_x = x * factor;
-            let mut sum = 0u32;
-            for dy in 0..factor {
-                let row_idx = (base_y + dy) * w;
-                for dx in 0..factor {
-                    sum += raw[(row_idx + base_x + dx) as usize] as u32;
+    out_raw
+        .par_chunks_mut(nw as usize)
+        .enumerate()
+        .for_each(|(y, out_row)| {
+            let base_y = (y as u32) * factor;
+            for x in 0..nw {
+                let base_x = x * factor;
+                let mut sum = 0u32;
+                for dy in 0..factor {
+                    let row_idx = (base_y + dy) * w;
+                    for dx in 0..factor {
+                        sum += raw[(row_idx + base_x + dx) as usize] as u32;
+                    }
                 }
+                out_row[x as usize] = (sum / area) as u8;
             }
-            out_row[x as usize] = (sum / area) as u8;
-        }
-    });
+        });
     out
 }

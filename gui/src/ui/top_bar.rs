@@ -1,5 +1,9 @@
 use super::IdeState;
+use super::Modal;
+use super::modals::about::{APP_VERSION, AboutModal};
+use super::toolbar::render_toolbox_toggle;
 use crate::state::SharedState;
+use crate::ui::theme::ThemePalette;
 use eframe::egui;
 
 pub fn render_top_bar(ui: &mut egui::Ui, state: &SharedState, ide: &mut IdeState) {
@@ -9,10 +13,13 @@ pub fn render_top_bar(ui: &mut egui::Ui, state: &SharedState, ide: &mut IdeState
     };
 
     ui.horizontal(|ui| {
-        render_title_and_version(ui, &palette);
+        render_toolbox_toggle(ui, state, &palette);
+        ui.add_space(4.0);
+        render_title_and_version(ui, &palette, ide);
         ui.add_space(12.0);
 
         let saved_visuals = ui.visuals().clone();
+        // menu buttons inherit the theme's widget styling, which clashes with the flat top bar; patch just these visuals and restore them after.
         apply_menu_bar_theme(ui, &palette);
 
         let file_action = render_file_menu(ui, &palette);
@@ -26,25 +33,28 @@ pub fn render_top_bar(ui: &mut egui::Ui, state: &SharedState, ide: &mut IdeState
     });
 }
 
-fn render_title_and_version(ui: &mut egui::Ui, palette: &crate::ui::theme::ThemePalette) {
-    ui.label(
-        egui::RichText::new("wmacro")
-            .strong()
-            .size(15.0)
-            .color(palette.text_primary),
-    );
-
-    egui::Frame::NONE
-        .fill(palette.bg_element)
-        .corner_radius(egui::CornerRadius::same(3))
-        .inner_margin(egui::Margin::symmetric(5, 1))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new("v0.2.0")
-                    .size(9.0)
-                    .color(palette.text_muted),
-            );
-        });
+fn render_title_and_version(
+    ui: &mut egui::Ui,
+    palette: &crate::ui::theme::ThemePalette,
+    ide: &mut IdeState,
+) {
+    if ui
+        .add(
+            egui::Button::new(
+                egui::RichText::new("wmacro")
+                    .strong()
+                    .size(13.0)
+                    .color(palette.text_primary),
+            )
+            .frame(false)
+            .min_size(egui::vec2(0.0, 24.0)),
+        )
+        .on_hover_text(format!("About wmacro ({APP_VERSION})"))
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
+        ide.modal = Modal::Widget(Box::new(AboutModal::new()));
+    }
 }
 
 fn apply_menu_bar_theme(ui: &mut egui::Ui, palette: &crate::ui::theme::ThemePalette) {
@@ -108,7 +118,7 @@ fn render_file_menu(ui: &mut egui::Ui, palette: &crate::ui::theme::ThemePalette)
     action
 }
 
-fn render_help_menu(ui: &mut egui::Ui, palette: &crate::ui::theme::ThemePalette) {
+fn render_help_menu(ui: &mut egui::Ui, palette: &ThemePalette) {
     ui.menu_button(
         egui::RichText::new("Help")
             .color(palette.text_primary)
@@ -140,6 +150,7 @@ fn menu_item(ui: &mut egui::Ui, label: &str) -> bool {
 }
 
 fn render_window_controls(ui: &mut egui::Ui, palette: &crate::ui::theme::ThemePalette) {
+    // a decorative title bar: dragging anywhere on the empty strip moves the window, and the faux buttons map to real viewport commands.
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if window_control_button(ui, egui_phosphor::regular::X, palette.accent_danger) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -189,7 +200,9 @@ fn dispatch_file_action(
 }
 
 fn start_new_macro(state: &SharedState, ide: &mut IdeState) {
+    // TODO: confirm discarding unsaved changes before wiping the editor; currently New is a quiet data-loss footgun.
     let mut s = state.lock().unwrap();
+    s.macro_state.push_undo();
     s.macro_state.current_macro = Some(wmacro_core_types::Macro::new("untitled"));
     s.macro_state.events_captured = 0;
     s.macro_state.macro_name = "untitled".to_string();
@@ -214,6 +227,7 @@ fn spawn_open_macro(ctx: &egui::Context, state: &SharedState, ide: &mut IdeState
         match crate::macro_engine::storage::load_wmr(&path) {
             Ok(m) => {
                 let mut s = state.lock().unwrap();
+                s.macro_state.push_undo();
                 s.macro_state.macro_name = m.name.clone();
                 s.macro_state.events_captured = m.commands.len();
                 s.macro_state.current_macro = Some(m);
@@ -229,7 +243,6 @@ fn spawn_open_macro(ctx: &egui::Context, state: &SharedState, ide: &mut IdeState
 
         ctx.request_repaint();
     });
-
 
     ide.pending_clear_selection = true;
 }
@@ -275,7 +288,7 @@ pub fn spawn_save_macro_as(ctx: &egui::Context, state: &SharedState, quit_after_
         let Some(path) = rfd::FileDialog::new()
             .set_directory(crate::macro_engine::storage::default_macro_dir())
             .add_filter("wmacro script", &["wmr"])
-            .set_file_name(&format!("{}.wmr", m.name))
+            .set_file_name(format!("{}.wmr", m.name))
             .save_file()
         else {
             return;
@@ -307,4 +320,3 @@ pub fn spawn_save_macro_as(ctx: &egui::Context, state: &SharedState, quit_after_
         ctx.request_repaint();
     });
 }
-

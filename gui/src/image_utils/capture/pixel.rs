@@ -1,5 +1,3 @@
-//! pixel format mapping, BGRA -> Rec.601 luma conversion, and color copies.
-
 use gbm::Format as GbmFormat;
 use image::{GrayImage, RgbaImage};
 use pipewire::spa::param::video::VideoFormat;
@@ -30,9 +28,8 @@ impl PixelFormat {
         }
     }
 
-    /// DRM fourcc matching the in-memory byte order.
-    /// DRM fourcc codes name channels from MSB to LSB, so the memory layout is
-    /// the reversed name (e.g. DRM_FORMAT_ARGB8888 is BGRA in memory).
+    /// DRM fourcc codes name channels MSB to LSB, so the memory layout is the
+    /// reversed name (e.g. DRM_FORMAT_ARGB8888 is BGRA in memory).
     pub(super) fn fourcc(self) -> GbmFormat {
         match self {
             Self::Bgra => GbmFormat::Argb8888,
@@ -46,7 +43,7 @@ impl PixelFormat {
 }
 
 /// byte index of the r/g/b channel inside a 4-byte pixel word for `fmt`.
-fn channel_offsets(fmt: PixelFormat) -> (u32, u32, u32) {
+pub(super) fn channel_offsets(fmt: PixelFormat) -> (u32, u32, u32) {
     match fmt {
         PixelFormat::Bgra | PixelFormat::Bgrx => (2u32, 1u32, 0u32),
         PixelFormat::Rgba | PixelFormat::Rgbx => (0, 1, 2),
@@ -63,8 +60,7 @@ fn luma_word(px: u32, ro: u32, go: u32, bo: u32) -> u8 {
     ((r * 77 + g * 150 + b * 29) >> 8) as u8
 }
 
-/// converts one row. the inner loop loads 4 bytes as one u32 word with
-/// constant channel shifts, which LLVM can vectorize.
+/// converts one row; loads 4 bytes as one u32 word with constant channel shifts, which LLVM can vectorize.
 #[inline]
 fn convert_row(src: &[u8], src_off: usize, w: u32, out: &mut [u8], ro: u32, go: u32, bo: u32) {
     for col in 0..w {
@@ -94,10 +90,8 @@ fn copy_row(src: &[u8], src_off: usize, w: u32, out: &mut [u8], ro: u32, go: u32
     }
 }
 
-/// converts `(x0, y0, w, h)` from the raw `src` frame into `dst`, applying
-/// Rec.601 luma weights. rows that would read past the end of `src` are
-/// skipped (defensive; the frame may be a partial last frame). large regions
-/// are converted with rows split across the rayon pool.
+/// converts `(x0, y0, w, h)` from `src` into `dst` with Rec.601 luma weights;
+/// rows past the end of `src` are skipped (defensive, for a partial last frame).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn convert_region(
     src: &[u8],
@@ -129,22 +123,12 @@ pub(super) fn convert_region(
                 break;
             }
             let r0 = row as usize * w as usize;
-            convert_row(
-                src,
-                src_off,
-                w,
-                &mut out[r0..r0 + w as usize],
-                ro,
-                go,
-                bo,
-            );
+            convert_row(src, src_off, w, &mut out[r0..r0 + w as usize], ro, go, bo);
         }
     }
 }
 
-/// copies `(x0, y0, w, h)` from the raw `src` frame into `dst` as RGBA,
-/// reordering channels by `fmt`. same row iteration and rayon split as
-/// `convert_region`, used for color reads (if-pixel-color).
+/// copies `(x0, y0, w, h)` from `src` into `dst` as RGBA, reordering channels by `fmt`; for color reads.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn copy_region_rgba(
     src: &[u8],

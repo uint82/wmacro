@@ -1,10 +1,12 @@
 use super::actions::EditorActions;
 use crate::ui::IdeState;
+use crate::ui::block_analysis::BlockAnalysis;
 use crate::ui::modals::{Modal, modal_from_command};
 use crate::ui::theme::ThemePalette;
-use wmacro_core_types::MacroCommand;
 use eframe::egui;
+use wmacro_core_types::MacroCommand;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_context_menu(
     ui: &mut egui::Ui,
     ide: &mut IdeState,
@@ -14,7 +16,9 @@ pub fn render_context_menu(
     cmd: &MacroCommand,
     commands: &[MacroCommand],
     actions: &mut EditorActions,
+    analysis: &BlockAnalysis,
 ) {
+    // right-clicking an unselected row re-targets the selection to it, so the menu always acts on exactly what the user pointed at.
     if !ide.selected.contains(&clicked_idx) {
         ide.selected.clear();
         ide.selected.insert(clicked_idx);
@@ -49,14 +53,33 @@ pub fn render_context_menu(
         ui.close();
     }
 
-    if sel_count == 1 {
-        if ui
+    if sel_count == 1
+        && ui
             .button(format!("{}  Edit", egui_phosphor::regular::PENCIL))
             .clicked()
-        {
-            if let Some(m) = modal_from_command(cmd, clicked_idx) {
-                *edit_modal = Some(m);
-            }
+    {
+        if let Some(m) = modal_from_command(cmd, clicked_idx) {
+            *edit_modal = Some(m);
+        }
+        ui.close();
+    }
+
+    if analysis
+        .fold_end
+        .get(clicked_idx)
+        .copied()
+        .flatten()
+        .is_some()
+    {
+        // only rows that open a block get a fold toggle, so the option appears exactly where it can do something useful.
+        let folded = ide.folded_blocks.contains(&clicked_idx);
+        let (icon, label) = if folded {
+            (egui_phosphor::regular::CARET_RIGHT, "Unfold")
+        } else {
+            (egui_phosphor::regular::CARET_DOWN, "Fold")
+        };
+        if ui.button(format!("{}  {label}", icon)).clicked() {
+            actions.fold_toggle = Some(clicked_idx);
             ui.close();
         }
     }
@@ -106,7 +129,10 @@ pub fn render_context_menu(
     let has_delay = ide.selected.iter().any(|&i| {
         matches!(
             commands.get(i),
-            Some(MacroCommand::Action(wmacro_core_types::MacroEvent::Delay(_)))
+            Some(MacroCommand::Delay { .. })
+                | Some(MacroCommand::Action(wmacro_core_types::MacroEvent::Delay(
+                    _
+                )))
         )
     });
     if has_delay {
@@ -156,6 +182,7 @@ pub fn render_global_context_menu(
     ide: &mut IdeState,
     actions: &mut EditorActions,
 ) {
+    // empty-background menu: same clipboard commands as the row menu, minus the row-relative ones. TODO: factor these shared items into one helper.
     if ui
         .add_enabled(
             !ide.clipboard.is_empty(),

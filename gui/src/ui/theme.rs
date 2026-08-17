@@ -38,16 +38,18 @@ pub struct ThemeFile {
     pub col_goto: String,
     pub col_type_text: String,
     pub col_import_saved_macro: String,
+    // new fields use serde defaults so existing theme files (built-in and user-provided) still deserialize.
+    #[serde(default = "default_fallback_color")]
+    pub col_var: String,
+    #[serde(default = "default_fallback_color")]
+    pub col_calc: String,
+    #[serde(default = "default_fallback_color")]
+    pub col_clipboard: String,
 }
 
-// uncomment if a future release adds a new boolean setting.
-// so anytheme.json can still be deserilized wihtout the new field
-//
-// #[serde(default = "default_fallback_color")]
-//
-//fn default_fallback_color() -> String {
-//    "#808080".to_string()
-//}
+fn default_fallback_color() -> String {
+    "#808080".to_string()
+}
 
 #[derive(Debug, Clone)]
 pub struct ThemePalette {
@@ -83,6 +85,9 @@ pub struct ThemePalette {
     pub col_goto: Color32,
     pub col_type_text: Color32,
     pub col_import_saved_macro: Color32,
+    pub col_var: Color32,
+    pub col_calc: Color32,
+    pub col_clipboard: Color32,
 }
 
 /// TODO: expand this to support 3-digit hex (#FFF) and 8-digit hex with alpha (#FFFFFFFF) if needed.
@@ -98,7 +103,11 @@ fn hex_to_color(hex: &str) -> Color32 {
         u8::from_str_radix(&hex_clean[start..end], 16)
     };
 
-    match (parse_channel(0, 2), parse_channel(2, 4), parse_channel(4, 6)) {
+    match (
+        parse_channel(0, 2),
+        parse_channel(2, 4),
+        parse_channel(4, 6),
+    ) {
         (Ok(r), Ok(g), Ok(b)) => Color32::from_rgb(r, g, b),
         _ => {
             log::warn!("Failed to parse hex color '{}', falling back to black", hex);
@@ -138,6 +147,9 @@ impl ThemeFile {
             col_goto: hex_to_color(&self.col_goto),
             col_type_text: hex_to_color(&self.col_type_text),
             col_import_saved_macro: hex_to_color(&self.col_import_saved_macro),
+            col_var: hex_to_color(&self.col_var),
+            col_calc: hex_to_color(&self.col_calc),
+            col_clipboard: hex_to_color(&self.col_clipboard),
         }
     }
 }
@@ -203,12 +215,14 @@ impl ThemeManager {
 
     pub fn default_theme() -> ThemePalette {
         static DEFAULT_THEME: OnceLock<ThemePalette> = OnceLock::new();
-        DEFAULT_THEME.get_or_init(|| {
-            let json_str = include_str!("../../themes/gruvbox_dark.json");
-            serde_json::from_str::<ThemeFile>(json_str)
-                .expect("error: gruvbox_dark.json is missing or invalid")
-                .to_palette()
-        }).clone()
+        DEFAULT_THEME
+            .get_or_init(|| {
+                let json_str = include_str!("../../themes/gruvbox_dark.json");
+                serde_json::from_str::<ThemeFile>(json_str)
+                    .expect("error: gruvbox_dark.json is missing or invalid")
+                    .to_palette()
+            })
+            .clone()
     }
 
     pub fn get_theme(&self, name: &str) -> ThemePalette {
@@ -223,7 +237,12 @@ impl ThemeManager {
     }
 
     fn insert_theme(&mut self, palette: ThemePalette) {
-        if let Some(existing) = self.available_themes.iter_mut().find(|t| t.name == palette.name) {
+        // a user theme with the same name silently replaces the built-in, which is how custom palettes can take over default names.
+        if let Some(existing) = self
+            .available_themes
+            .iter_mut()
+            .find(|t| t.name == palette.name)
+        {
             *existing = palette;
         } else {
             self.available_themes.push(palette);
@@ -231,6 +250,7 @@ impl ThemeManager {
     }
 
     fn load_built_in_themes(&mut self) {
+        // embedded JSON keeps the binary self-contained; a broken built-in is a packaging bug, hence the loud error level.
         let built_ins = [
             include_str!("../../themes/ayu_dark.json"),
             include_str!("../../themes/catppuccin_mocha.json"),
@@ -256,6 +276,7 @@ impl ThemeManager {
     }
 
     fn load_user_themes_from_disk(&mut self) {
+        // TODO: watch the themes directory for changes so new themes show up without an app restart.
         let Some(proj_dirs) = directories::ProjectDirs::from("", "", "wmacro") else {
             log::warn!("Could not determine project directories for user themes");
             return;

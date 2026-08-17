@@ -1,12 +1,14 @@
-use wmacro_core_types::{DaemonEvent, HardwareEvent, HotkeyEvent};
 use std::sync::mpsc::{Receiver, Sender};
+use wmacro_core_types::{DaemonEvent, HardwareEvent, HotkeyEvent};
 
+/// fans daemon events out to the recorder and hotkey channels, so the daemon's one IPC channel never blocks on a slow consumer.
 pub fn spawn_ipc_bridge(
     event_rx: Receiver<DaemonEvent>,
     recorder_tx: Sender<HardwareEvent>,
     hotkey_tx: Sender<HotkeyEvent>,
 ) {
     std::thread::spawn(move || {
+        // when every consumer is gone there is nobody to deliver to, so the bridge winds down instead of spinning forever.
         for event in event_rx {
             match event {
                 DaemonEvent::Recorded(hw) => {

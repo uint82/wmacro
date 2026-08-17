@@ -4,12 +4,21 @@ use crate::ui::theme::ThemePalette;
 use eframe::egui;
 
 pub fn render(ui: &mut egui::Ui, state: &SharedState, palette: &ThemePalette) {
-    ui.label(egui::RichText::new("Configure how macros are played back.").color(palette.text_muted).size(11.0));
+    // TODO: add a preview button that plays a short sample path with the current humanize settings.
+    ui.label(
+        egui::RichText::new("Configure how macros are played back.")
+            .color(palette.text_muted)
+            .size(11.0),
+    );
     ui.add_space(10.0);
 
     let (mut speed, repeat_mode, mut smart_path) = {
         let Ok(s) = state.lock() else { return };
-        (s.macro_state.speed_multiplier, s.macro_state.repeat_mode.clone(), s.macro_state.playback_options.smart_path.clone())
+        (
+            s.macro_state.speed_multiplier,
+            s.macro_state.repeat_mode.clone(),
+            s.macro_state.playback_options.smart_path.clone(),
+        )
     };
 
     let mut repeat_count: u32 = match &repeat_mode {

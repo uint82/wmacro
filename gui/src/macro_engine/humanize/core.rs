@@ -1,12 +1,11 @@
 use std::f32::consts::PI;
-use std::time::SystemTime;
-use wmacro_core_types::{MacroCommand, MacroEvent, MousePosition, SmartPathOptions};
+use wmacro_core_types::{Coord, MacroCommand, MacroEvent, MousePosition, SmartPathOptions};
 
 use super::constants::*;
-use super::rng::Pcg;
-use super::noise::LowFrequencyNoise;
 use super::math::*;
 use super::movement::*;
+use super::noise::LowFrequencyNoise;
+use super::rng::{Pcg, time_seed};
 
 pub struct MovementProfile {
     pub curve: f32,
@@ -18,7 +17,9 @@ pub fn next_poll_dt(rng: &mut Pcg) -> u64 {
     if rng.next_f32() < 0.05 {
         rng.next_range(17.0, 25.0) as u64 * 1000
     } else {
-        rng.next_normal(POLLING_MEAN, POLLING_STDDEV).clamp(7.0, 15.0) as u64 * 1000
+        rng.next_normal(POLLING_MEAN, POLLING_STDDEV)
+            .clamp(7.0, 15.0) as u64
+            * 1000
     }
 }
 
@@ -27,19 +28,24 @@ pub fn humanize_commands(commands: &mut Vec<MacroCommand>, options: &SmartPathOp
         return;
     }
 
-    let seed = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0);
-    let mut rng = Pcg::new(seed);
+    let mut rng = Pcg::new(time_seed());
 
     let mut new_commands = Vec::with_capacity(commands.len() * 2);
     let mut current_segment = Vec::new();
     let mut prev_end_offset = (0.0, 0.0);
     let mut is_first_path = true;
 
-    let mut current_threshold_us = rng.next_range(10.0, options.segment_delay_threshold_ms as f32) as u64 * 1000;
+    let mut current_threshold_us =
+        rng.next_range(10.0, options.segment_delay_threshold_ms as f32) as u64 * 1000;
 
     for cmd in commands.iter() {
+        // variable-driven moves are resolved at dispatch time and cannot be
+        // precomputed here, so they pass through unchanged.
         let is_movement = match cmd {
-            MacroCommand::Action(MacroEvent::MouseMove { .. }) => true,
+            MacroCommand::Action(MacroEvent::MouseMove {
+                x: Coord::Const(_),
+                y: Coord::Const(_),
+            }) => true,
             MacroCommand::Action(MacroEvent::Delay(us)) if *us < current_threshold_us => true,
             _ => false,
         };
@@ -53,17 +59,46 @@ pub fn humanize_commands(commands: &mut Vec<MacroCommand>, options: &SmartPathOp
                     tremor: rng.next_range(0.0, options.path_wobble),
                     endpoint_jitter: rng.next_range(0.0, options.endpoint_jitter),
                 };
-                let processed = process_segment(&current_segment, &mut prev_end_offset, options, &profile, &mut rng, &mut is_first_path);
+                let processed = process_segment(
+                    &current_segment,
+                    &mut prev_end_offset,
+                    options,
+                    &profile,
+                    &mut rng,
+                    &mut is_first_path,
+                );
                 new_commands.extend(processed);
                 current_segment.clear();
-                current_threshold_us = rng.next_range(10.0, options.segment_delay_threshold_ms as f32) as u64 * 1000;
+                current_threshold_us =
+                    rng.next_range(10.0, options.segment_delay_threshold_ms as f32) as u64 * 1000;
             }
 
             let mut boundary_cmd = cmd.clone();
             match &mut boundary_cmd {
-                MacroCommand::Action(MacroEvent::MouseDown { position: MousePosition::Absolute { x, y }, .. }) |
-                MacroCommand::Action(MacroEvent::MouseUp { position: MousePosition::Absolute { x, y }, .. }) |
-                MacroCommand::Action(MacroEvent::Click { position: MousePosition::Absolute { x, y }, .. }) => {
+                MacroCommand::Action(MacroEvent::MouseDown {
+                    position:
+                        MousePosition::Absolute {
+                            x: Coord::Const(x),
+                            y: Coord::Const(y),
+                        },
+                    ..
+                })
+                | MacroCommand::Action(MacroEvent::MouseUp {
+                    position:
+                        MousePosition::Absolute {
+                            x: Coord::Const(x),
+                            y: Coord::Const(y),
+                        },
+                    ..
+                })
+                | MacroCommand::Action(MacroEvent::Click {
+                    position:
+                        MousePosition::Absolute {
+                            x: Coord::Const(x),
+                            y: Coord::Const(y),
+                        },
+                    ..
+                }) => {
                     *x = (*x as f32 + prev_end_offset.0).round() as i32;
                     *y = (*y as f32 + prev_end_offset.1).round() as i32;
                 }
@@ -79,7 +114,14 @@ pub fn humanize_commands(commands: &mut Vec<MacroCommand>, options: &SmartPathOp
             tremor: rng.next_range(0.0, options.path_wobble),
             endpoint_jitter: rng.next_range(0.0, options.endpoint_jitter),
         };
-        let processed = process_segment(&current_segment, &mut prev_end_offset, options, &profile, &mut rng, &mut is_first_path);
+        let processed = process_segment(
+            &current_segment,
+            &mut prev_end_offset,
+            options,
+            &profile,
+            &mut rng,
+            &mut is_first_path,
+        );
         new_commands.extend(processed);
     }
 
@@ -92,7 +134,7 @@ fn process_segment(
     options: &SmartPathOptions,
     profile: &MovementProfile,
     rng: &mut Pcg,
-    is_first_path: &mut bool
+    is_first_path: &mut bool,
 ) -> Vec<MacroCommand> {
     let mut noise = LowFrequencyNoise::new(rng);
     let mut pts = Vec::new();
@@ -100,7 +142,10 @@ fn process_segment(
 
     for cmd in seg {
         match cmd {
-            MacroCommand::Action(MacroEvent::MouseMove { x, y }) => pts.push((*x as f32, *y as f32)),
+            MacroCommand::Action(MacroEvent::MouseMove {
+                x: Coord::Const(x),
+                y: Coord::Const(y),
+            }) => pts.push((*x as f32, *y as f32)),
             MacroCommand::Action(MacroEvent::Delay(us)) => total_delay_us += *us,
             _ => {}
         }
@@ -110,21 +155,29 @@ fn process_segment(
         return seg.to_vec();
     }
 
-    let start_offset = if *is_first_path { (0.0, 0.0) } else { *prev_end_offset };
+    let start_offset = if *is_first_path {
+        (0.0, 0.0)
+    } else {
+        *prev_end_offset
+    };
     *is_first_path = false;
 
     let a = pts[0];
     let b = *pts.last().unwrap();
     let dx_total = b.0 - a.0;
     let dy_total = b.1 - a.1;
-    let total_dist = (dx_total*dx_total + dy_total*dy_total).sqrt();
+    let total_dist = (dx_total * dx_total + dy_total * dy_total).sqrt();
 
     if total_dist < 1.0 || total_delay_us < 10_000 {
         *prev_end_offset = start_offset;
         let mut out = Vec::new();
         for cmd in seg {
             let mut c = cmd.clone();
-            if let MacroCommand::Action(MacroEvent::MouseMove { x, y }) = &mut c {
+            if let MacroCommand::Action(MacroEvent::MouseMove {
+                x: Coord::Const(x),
+                y: Coord::Const(y),
+            }) = &mut c
+            {
                 *x = (*x as f32 + start_offset.0).round() as i32;
                 *y = (*y as f32 + start_offset.1).round() as i32;
             }
@@ -144,7 +197,8 @@ fn process_segment(
 
         let recorded_mid = pts[pts.len() / 2];
         let chord_mid = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
-        recorded_lateral = (recorded_mid.0 - chord_mid.0) * perp_x + (recorded_mid.1 - chord_mid.1) * perp_y;
+        recorded_lateral =
+            (recorded_mid.0 - chord_mid.0) * perp_x + (recorded_mid.1 - chord_mid.1) * perp_y;
     }
 
     let effective_endpoint_jitter = (total_dist.sqrt() * 0.15).min(profile.endpoint_jitter);
@@ -160,7 +214,10 @@ fn process_segment(
     };
 
     let overshoot_mag = if rng.next_f32() < overshoot_prob {
-        rng.next_range(1.0, (total_dist * OVERSHOOT_DIST_SCALAR).min(OVERSHOOT_MAX_DIST))
+        rng.next_range(
+            1.0,
+            (total_dist * OVERSHOOT_DIST_SCALAR).min(OVERSHOOT_MAX_DIST),
+        )
     } else {
         0.0
     };
@@ -169,14 +226,19 @@ fn process_segment(
         let ux = dx_total / total_dist;
         let uy = dy_total / total_dist;
         (ux * overshoot_mag, uy * overshoot_mag)
-    } else { (0.0, 0.0) };
+    } else {
+        (0.0, 0.0)
+    };
 
     let split_pct = rng.next_range(SPLIT_PCT_MIN, SPLIT_PCT_MAX);
 
     let waypoints = generate_waypoints(a, b, class, rng, options);
 
     struct SubMovement {
-        p0: (f32, f32), p1: (f32, f32), p2: (f32, f32), p3: (f32, f32),
+        p0: (f32, f32),
+        p1: (f32, f32),
+        p2: (f32, f32),
+        p3: (f32, f32),
         lut: Vec<(f32, f32)>,
         delay_share_us: u64,
         profile: VelocityProfile,
@@ -189,8 +251,8 @@ fn process_segment(
     let mut sum_sub_dist = 0.0;
     for i in 0..num_subs {
         let wp0 = waypoints[i];
-        let wp1 = waypoints[i+1];
-        let d = ((wp1.0-wp0.0).powi(2) + (wp1.1-wp0.1).powi(2)).sqrt();
+        let wp1 = waypoints[i + 1];
+        let d = ((wp1.0 - wp0.0).powi(2) + (wp1.1 - wp0.1).powi(2)).sqrt();
         sub_dists.push(d);
         sum_sub_dist += d;
     }
@@ -198,7 +260,7 @@ fn process_segment(
     let mut delay_left = total_delay_us;
     for i in 0..num_subs {
         let wp0 = waypoints[i];
-        let mut wp1 = waypoints[i+1];
+        let mut wp1 = waypoints[i + 1];
 
         let share = if i == num_subs - 1 || sum_sub_dist == 0.0 {
             delay_left
@@ -217,32 +279,63 @@ fn process_segment(
             wp1.1 += overshoot_vec.1;
         }
 
-        let d = ((wp1.0-wp0.0).powi(2) + (wp1.1-wp0.1).powi(2)).sqrt();
-        let (ux, uy) = if d > 0.0 { ((wp1.0-wp0.0)/d, (wp1.1-wp0.1)/d) } else { (0.0, 0.0) };
+        let d = ((wp1.0 - wp0.0).powi(2) + (wp1.1 - wp0.1).powi(2)).sqrt();
+        let (ux, uy) = if d > 0.0 {
+            ((wp1.0 - wp0.0) / d, (wp1.1 - wp0.1) / d)
+        } else {
+            (0.0, 0.0)
+        };
         let perp = (-uy, ux);
 
         let alpha1 = rng.next_normal(0.35, 0.07).clamp(0.20, 0.50);
         let beta1_synth = profile.curve * d;
 
-        let recorded_lateral_scaled = if total_dist > 0.0 { recorded_lateral * (d / total_dist) } else { 0.0 };
+        let recorded_lateral_scaled = if total_dist > 0.0 {
+            recorded_lateral * (d / total_dist)
+        } else {
+            0.0
+        };
 
         let mut beta1 = 0.75 * beta1_synth + RECORDED_STYLE * recorded_lateral_scaled;
-        beta1 = beta1.clamp(-profile.curve.abs() * d * 1.5, profile.curve.abs() * d * 1.5);
-        let p1 = (wp0.0 + alpha1 * d * ux + beta1 * perp.0, wp0.1 + alpha1 * d * uy + beta1 * perp.1);
+        beta1 = beta1.clamp(
+            -profile.curve.abs() * d * 1.5,
+            profile.curve.abs() * d * 1.5,
+        );
+        let p1 = (
+            wp0.0 + alpha1 * d * ux + beta1 * perp.0,
+            wp0.1 + alpha1 * d * uy + beta1 * perp.1,
+        );
 
         let alpha2 = rng.next_normal(0.65, 0.07).clamp(0.50, 0.80);
-        let s_curve_prob = if class == MovementClass::Long { 0.15 } else { 0.30 };
+        let s_curve_prob = if class == MovementClass::Long {
+            0.15
+        } else {
+            0.30
+        };
         let s_curve = rng.next_f32() < s_curve_prob;
-        let beta2_sign = if s_curve { -beta1.signum() } else { beta1.signum() };
+        let beta2_sign = if s_curve {
+            -beta1.signum()
+        } else {
+            beta1.signum()
+        };
         let beta2_mag = (beta1.abs() * 0.8).clamp(0.0, profile.curve.abs() * d * 1.5);
         let beta2 = beta2_sign * beta2_mag;
-        let p2 = (wp0.0 + alpha2 * d * ux + beta2 * perp.0, wp0.1 + alpha2 * d * uy + beta2 * perp.1);
+        let p2 = (
+            wp0.0 + alpha2 * d * ux + beta2 * perp.0,
+            wp0.1 + alpha2 * d * uy + beta2 * perp.1,
+        );
 
         let lut = build_arc_lut(wp0, p1, p2, wp1, profile.curve.abs());
         let vel_profile = choose_velocity_profile(class, rng);
 
         subs.push(SubMovement {
-            p0: wp0, p1, p2, p3: wp1, lut, delay_share_us: share, profile: vel_profile
+            p0: wp0,
+            p1,
+            p2,
+            p3: wp1,
+            lut,
+            delay_share_us: share,
+            profile: vel_profile,
         });
     }
 
@@ -250,13 +343,13 @@ fn process_segment(
 
     let mut last_emitted = (
         (a.0 + start_offset.0).round() as i32,
-        (a.1 + start_offset.1).round() as i32
+        (a.1 + start_offset.1).round() as i32,
     );
     let mut last_emit_t = 0;
 
     seq.push(MacroCommand::Action(MacroEvent::MouseMove {
-        x: last_emitted.0,
-        y: last_emitted.1
+        x: Coord::Const(last_emitted.0),
+        y: Coord::Const(last_emitted.1),
     }));
 
     let mut global_t_us: u64 = 0;
@@ -276,12 +369,13 @@ fn process_segment(
         while sub_t_us < sub.delay_share_us {
             let mut dt = next_poll_dt(rng);
 
-            if let Some(h_time) = hesitate_event {
-                if sub_t_us <= h_time && sub_t_us + dt > h_time {
-                    let h_dur = rng.next_range(6.0, 20.0) as u64 * 1000;
-                    dt += h_dur;
-                    hesitate_event = None;
-                }
+            if let Some(h_time) = hesitate_event
+                && sub_t_us <= h_time
+                && sub_t_us + dt > h_time
+            {
+                let h_dur = rng.next_range(6.0, 20.0) as u64 * 1000;
+                dt += h_dur;
+                hesitate_event = None;
             }
 
             let next_t = (sub_t_us + dt).min(sub.delay_share_us);
@@ -310,14 +404,20 @@ fn process_segment(
 
             let dx = base_pos.0 - last_base.0;
             let dy = base_pos.1 - last_base.1;
-            let len = (dx*dx + dy*dy).sqrt();
-            let (perp_x, perp_y) = if len > 0.0 { (-dy/len, dx/len) } else { (0.0, 0.0) };
+            let len = (dx * dx + dy * dy).sqrt();
+            let (perp_x, perp_y) = if len > 0.0 {
+                (-dy / len, dx / len)
+            } else {
+                (0.0, 0.0)
+            };
 
             let wobble_scalar = if u_global <= split_pct {
                 let wobble_amp = (PI * (u_global / split_pct)).sin();
                 let pn = noise.next_value(rng);
                 pn * wobble_amplitude * wobble_amp
-            } else { 0.0 };
+            } else {
+                0.0
+            };
 
             let wobble_x = perp_x * wobble_scalar;
             let wobble_y = perp_y * wobble_scalar;
@@ -336,8 +436,8 @@ fn process_segment(
                     seq.push(MacroCommand::Action(MacroEvent::Delay(delay_since_last)));
                 }
                 seq.push(MacroCommand::Action(MacroEvent::MouseMove {
-                    x: final_x_i32,
-                    y: final_y_i32
+                    x: Coord::Const(final_x_i32),
+                    y: Coord::Const(final_y_i32),
                 }));
                 last_emitted = (final_x_i32, final_y_i32);
                 last_emit_t = global_next_t;
@@ -360,8 +460,8 @@ fn process_segment(
     );
     if last_emitted != final_target {
         seq.push(MacroCommand::Action(MacroEvent::MouseMove {
-            x: final_target.0,
-            y: final_target.1
+            x: Coord::Const(final_target.0),
+            y: Coord::Const(final_target.1),
         }));
     }
 

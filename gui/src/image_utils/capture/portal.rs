@@ -1,9 +1,6 @@
-//! xdg-desktop-portal ScreenCast session helpers: restore-token persistence
-//! and matching the captured stream back to a known output.
-
 use std::path::PathBuf;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::image_utils::outputs::OutputInfo;
 
@@ -46,7 +43,9 @@ pub(super) fn match_output(
     mapping_id: Option<&str>,
 ) -> Result<OutputInfo> {
     if let Some(o) = mapping_id.and_then(|name| {
-        outputs.iter().find(|o| !o.name.is_empty() && o.name == name)
+        outputs
+            .iter()
+            .find(|o| !o.name.is_empty() && o.name == name)
     }) {
         return Ok(o.clone());
     }

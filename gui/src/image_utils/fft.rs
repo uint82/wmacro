@@ -1,6 +1,6 @@
 use image::GrayImage;
 use rayon::prelude::*;
-use rustfft::{num_complex::Complex, Fft, FftPlanner};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::sync::Arc;
 use transpose::transpose;
 
@@ -45,7 +45,10 @@ fn fft2d_par(
     fft_cols_par(data, width, height, &fft_h);
 }
 
-pub(crate) fn fft_cross_correlate(search: &GrayImage, template: &GrayImage) -> (Vec<f32>, usize, usize) {
+pub(crate) fn fft_cross_correlate(
+    search: &GrayImage,
+    template: &GrayImage,
+) -> (Vec<f32>, usize, usize) {
     let t_start = std::time::Instant::now();
     let sw = search.width() as usize;
     let sh = search.height() as usize;
@@ -66,21 +69,30 @@ pub(crate) fn fft_cross_correlate(search: &GrayImage, template: &GrayImage) -> (
     let t_raw = template.as_raw();
 
     const NORM: f32 = 1.0 / 255.0;
-    s_buf.par_chunks_mut(fft_w).enumerate().for_each(|(y, row)| {
-        if y < sh {
-            for x in 0..sw {
-                row[x].re = s_raw[y * sw + x] as f32 * NORM;
+    s_buf
+        .par_chunks_mut(fft_w)
+        .enumerate()
+        .for_each(|(y, row)| {
+            if y < sh {
+                for x in 0..sw {
+                    row[x].re = s_raw[y * sw + x] as f32 * NORM;
+                }
             }
-        }
-    });
-    t_buf.par_chunks_mut(fft_w).enumerate().for_each(|(y, row)| {
-        if y < th {
-            for x in 0..tw {
-                row[x].re = t_raw[y * tw + x] as f32 * NORM;
+        });
+    t_buf
+        .par_chunks_mut(fft_w)
+        .enumerate()
+        .for_each(|(y, row)| {
+            if y < th {
+                for x in 0..tw {
+                    row[x].re = t_raw[y * tw + x] as f32 * NORM;
+                }
             }
-        }
-    });
-    log::debug!("[TIMING] FFT array allocation & init took: {:?}", t_start.elapsed());
+        });
+    log::debug!(
+        "[TIMING] FFT array allocation & init took: {:?}",
+        t_start.elapsed()
+    );
 
     let t1 = std::time::Instant::now();
     let mut planner = FftPlanner::<f32>::new();
@@ -89,10 +101,16 @@ pub(crate) fn fft_cross_correlate(search: &GrayImage, template: &GrayImage) -> (
     log::debug!("[TIMING] FFT forward passes took: {:?}", t1.elapsed());
 
     let t2 = std::time::Instant::now();
-    s_buf.par_iter_mut().zip(t_buf.par_iter()).for_each(|(s, t)| {
-        *s = *s * t.conj();
-    });
-    log::debug!("[TIMING] FFT complex multiplication took: {:?}", t2.elapsed());
+    s_buf
+        .par_iter_mut()
+        .zip(t_buf.par_iter())
+        .for_each(|(s, t)| {
+            *s *= t.conj();
+        });
+    log::debug!(
+        "[TIMING] FFT complex multiplication took: {:?}",
+        t2.elapsed()
+    );
 
     let t3 = std::time::Instant::now();
     fft2d_par(&mut s_buf, fft_w, fft_h, &mut planner, true);
@@ -101,12 +119,18 @@ pub(crate) fn fft_cross_correlate(search: &GrayImage, template: &GrayImage) -> (
     let t4 = std::time::Instant::now();
     let scale = 1.0 / fft_size as f32;
     let mut cross = vec![0f32; out_w * out_h];
-    cross.par_chunks_mut(out_w).enumerate().for_each(|(y, row)| {
-        for x in 0..out_w {
-            row[x] = s_buf[y * fft_w + x].re * scale;
-        }
-    });
-    log::debug!("[TIMING] FFT output scaling & extract took: {:?}", t4.elapsed());
+    cross
+        .par_chunks_mut(out_w)
+        .enumerate()
+        .for_each(|(y, row)| {
+            for x in 0..out_w {
+                row[x] = s_buf[y * fft_w + x].re * scale;
+            }
+        });
+    log::debug!(
+        "[TIMING] FFT output scaling & extract took: {:?}",
+        t4.elapsed()
+    );
 
     (cross, out_w, out_h)
 }

@@ -1,7 +1,8 @@
 use crate::state::{MacroRepeatMode, RecordHotkeyBehavior};
-use wmacro_core_types::{Hotkey, Modifiers};
+use crate::ui::toolbox::ToolId;
 use log::error;
 use serde::{Deserialize, Serialize};
+use wmacro_core_types::{Hotkey, Modifiers};
 
 pub const DEFAULT_THEME_NAME: &str = "Gruvbox Dark";
 
@@ -25,16 +26,22 @@ pub struct Settings {
     pub record_mouse: bool,
     pub record_movements: bool,
     pub record_keyboard: bool,
+
+    // most recently used toolbox commands, most recent first.
+    #[serde(default)]
+    pub toolbox_recents: Vec<ToolId>,
+
+    #[serde(default)]
+    pub show_toolbox: bool,
+
+    #[serde(default)]
+    pub recents_collapsed: bool,
 }
 
-// uncomment if a future release adds a new boolean setting.
-// so settings.json can still be deserilized without the new bool field
-//
-// #[serde(default = "default_true")]
-//
-// fn default_true() -> bool {
-//     true
-// }
+// new boolean settings default to true so existing settings.json files can still be deserialized without the new field.
+fn default_true() -> bool {
+    true
+}
 
 pub(crate) fn default_record_hotkey() -> Option<Hotkey> {
     Some(Hotkey::plain(65))
@@ -53,7 +60,13 @@ pub(crate) fn default_abort_play_hotkey() -> Option<Hotkey> {
 }
 
 pub(crate) fn default_step_play_hotkey() -> Option<Hotkey> {
-    Some(Hotkey::new(37, Modifiers { shift: true, ..Default::default() }))
+    Some(Hotkey::new(
+        37,
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    ))
 }
 
 pub(crate) fn default_capture_hotkey() -> Option<Hotkey> {
@@ -78,6 +91,9 @@ impl Default for Settings {
             record_mouse: true,
             record_movements: true,
             record_keyboard: true,
+            toolbox_recents: Vec::new(),
+            show_toolbox: true,
+            recents_collapsed: false,
         }
     }
 }
@@ -109,19 +125,23 @@ impl Settings {
 
     pub fn save(&self) {
         let Some(path) = Self::path() else { return };
-        if let Some(parent) = path.parent() {
-            if let Err(err) = std::fs::create_dir_all(parent) {
-                error!(
-                    "wmacro: failed to create settings directory {}: {err}",
-                    parent.display()
-                );
-                return;
-            }
+        // TODO: write to a temp file and rename, so a crash mid-write cannot corrupt the settings file.
+        if let Some(parent) = path.parent()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
+            error!(
+                "wmacro: failed to create settings directory {}: {err}",
+                parent.display()
+            );
+            return;
         }
         match serde_json::to_string_pretty(self) {
             Ok(text) => {
                 if let Err(err) = std::fs::write(&path, text) {
-                    error!("wmacro: failed to write settings to {}: {err}", path.display());
+                    error!(
+                        "wmacro: failed to write settings to {}: {err}",
+                        path.display()
+                    );
                 }
             }
             Err(err) => error!("wmacro: failed to serialize settings: {err}"),

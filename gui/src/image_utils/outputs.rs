@@ -1,13 +1,7 @@
-//! enumerates Wayland outputs with logical geometry (position + size).
-//!
-//! prefers xdg_output (stable protocol) for logical positions/sizes, which
-//! also transparently covers fractional scale on compositors that support it.
-//! falls back to wl_output geometry/scale when xdg_output is not advertised.
-
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use std::time::{Duration, Instant};
 
-use wayland_client::globals::{registry_queue_init, GlobalListContents};
+use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{wl_output, wl_registry};
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_manager_v1::{
@@ -52,7 +46,6 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for OutputsState {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        // global advertisements are handled by the GlobalList internals.
     }
 }
 
@@ -69,7 +62,12 @@ impl Dispatch<wl_output::WlOutput, usize> for OutputsState {
         match event {
             wl_output::Event::Name { name } => acc.name = Some(name),
             wl_output::Event::Geometry { x, y, .. } => acc.geom_pos = Some((x, y)),
-            wl_output::Event::Mode { flags, width, height, .. } => {
+            wl_output::Event::Mode {
+                flags,
+                width,
+                height,
+                ..
+            } => {
                 if matches!(flags, WEnum::Value(m) if m.contains(wl_output::Mode::Current)) {
                     acc.geom_size = Some((width, height));
                 }
@@ -124,20 +122,24 @@ pub fn query_outputs() -> Result<Vec<OutputInfo>> {
             if global.interface == "wl_output" {
                 let idx = state.outputs.len();
                 state.outputs.push(OutputAccum::default());
-                let out = globals.registry().bind::<wl_output::WlOutput, usize, OutputsState>(
-                    global.name,
-                    global.version.min(4),
-                    &qh,
-                    idx,
-                );
+                let out = globals
+                    .registry()
+                    .bind::<wl_output::WlOutput, usize, OutputsState>(
+                        global.name,
+                        global.version.min(4),
+                        &qh,
+                        idx,
+                    );
                 state.proxies.push(out);
             } else if global.interface == "zxdg_output_manager_v1" && state.xdg_mgr.is_none() {
-                let mgr = globals.registry().bind::<ZxdgOutputManagerV1, (), OutputsState>(
-                    global.name,
-                    global.version.min(3),
-                    &qh,
-                    (),
-                );
+                let mgr = globals
+                    .registry()
+                    .bind::<ZxdgOutputManagerV1, (), OutputsState>(
+                        global.name,
+                        global.version.min(3),
+                        &qh,
+                        (),
+                    );
                 state.xdg_mgr = Some(mgr);
             }
         }
@@ -162,10 +164,7 @@ pub fn query_outputs() -> Result<Vec<OutputInfo>> {
                 .iter()
                 .all(|a| a.log_pos.is_some() && a.log_size.is_some())
         } else {
-            state
-                .outputs
-                .iter()
-                .all(|a| a.geom_size.is_some())
+            state.outputs.iter().all(|a| a.geom_size.is_some())
         };
         if ready || Instant::now() >= deadline {
             break;

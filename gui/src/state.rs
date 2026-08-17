@@ -1,9 +1,10 @@
 use crate::settings::{
-    default_abort_play_hotkey, default_abort_record_hotkey, default_capture_hotkey,
-    default_step_play_hotkey, Settings, DEFAULT_THEME_NAME,
+    DEFAULT_THEME_NAME, Settings, default_abort_play_hotkey, default_abort_record_hotkey,
+    default_capture_hotkey, default_step_play_hotkey,
 };
-use wmacro_core_types::{Hotkey, Macro};
+use crate::ui::toolbox::ToolId;
 use std::sync::{Arc, Mutex};
+use wmacro_core_types::{Hotkey, Macro, MacroCommand};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DelayUnit {
@@ -34,16 +35,11 @@ impl DelayUnit {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
 pub enum RecordHotkeyBehavior {
     Overwrite,
+    #[default]
     Append,
-}
-
-impl Default for RecordHotkeyBehavior {
-    fn default() -> Self {
-        Self::Append
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -97,6 +93,12 @@ pub struct MacroState {
     pub record_mouse: bool,
     pub record_movements: bool,
     pub record_keyboard: bool,
+
+    pub undo_stack: Vec<Vec<MacroCommand>>,
+    pub redo_stack: Vec<Vec<MacroCommand>>,
+
+    /// row index of the last command appended outside the UI pass (e.g. by the recorder); the editor consumes it once to scroll to and flash the row.
+    pub appended_row: Option<usize>,
 }
 
 impl Default for MacroState {
@@ -137,7 +139,53 @@ impl Default for MacroState {
             record_mouse: true,
             record_movements: true,
             record_keyboard: true,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            appended_row: None,
         }
+    }
+}
+
+impl MacroState {
+    pub const MAX_UNDO_HISTORY: usize = 100;
+
+    // undo snapshots are full command lists, so the cap doubles as a memory guard; 100 is plenty for a working session.
+    pub fn push_undo(&mut self) {
+        let Some(m) = self.current_macro.as_ref() else {
+            return;
+        };
+        self.undo_stack.push(m.commands.clone());
+        if self.undo_stack.len() > Self::MAX_UNDO_HISTORY {
+            self.undo_stack.remove(0);
+        }
+        self.redo_stack.clear();
+    }
+
+    pub fn undo(&mut self) -> bool {
+        // popping an undo snapshot pushes the current state onto the redo stack, keeping the two histories perfectly balanced.
+        let Some(snapshot) = self.undo_stack.pop() else {
+            return false;
+        };
+        let Some(m) = self.current_macro.as_mut() else {
+            return false;
+        };
+        self.redo_stack.push(m.commands.clone());
+        m.commands = snapshot;
+        self.events_captured = m.commands.len();
+        true
+    }
+
+    pub fn redo(&mut self) -> bool {
+        let Some(snapshot) = self.redo_stack.pop() else {
+            return false;
+        };
+        let Some(m) = self.current_macro.as_mut() else {
+            return false;
+        };
+        self.undo_stack.push(m.commands.clone());
+        m.commands = snapshot;
+        self.events_captured = m.commands.len();
+        true
     }
 }
 
@@ -182,6 +230,10 @@ pub struct AppState {
 
     pub theme_name: String,
     pub theme_manager: crate::ui::theme::ThemeManager,
+
+    pub toolbox_recents: Vec<ToolId>,
+    pub show_toolbox: bool,
+    pub recents_collapsed: bool,
 }
 
 impl Default for AppState {
@@ -196,12 +248,16 @@ impl Default for AppState {
             modal_alert: None,
             theme_name: DEFAULT_THEME_NAME.to_string(),
             theme_manager: crate::ui::theme::ThemeManager::new(),
+            toolbox_recents: Vec::new(),
+            show_toolbox: true,
+            recents_collapsed: false,
         }
     }
 }
 
 impl AppState {
     pub fn with_settings(settings: Settings) -> Self {
+        // settings are the durable source of truth; state only mirrors them for the current session. TODO: drop the mirror and read directly.
         let mut app_state = Self::default();
         app_state.macro_state.record_hotkey = settings.record_hotkey;
         app_state.macro_state.abort_record_hotkey = settings.abort_record_hotkey;
@@ -218,6 +274,9 @@ impl AppState {
         app_state.macro_state.record_movements = settings.record_movements;
         app_state.macro_state.record_keyboard = settings.record_keyboard;
         app_state.theme_name = settings.theme_name;
+        app_state.toolbox_recents = settings.toolbox_recents;
+        app_state.show_toolbox = settings.show_toolbox;
+        app_state.recents_collapsed = settings.recents_collapsed;
         app_state
     }
 
@@ -238,6 +297,9 @@ impl AppState {
             record_mouse: self.macro_state.record_mouse,
             record_movements: self.macro_state.record_movements,
             record_keyboard: self.macro_state.record_keyboard,
+            toolbox_recents: self.toolbox_recents.clone(),
+            show_toolbox: self.show_toolbox,
+            recents_collapsed: self.recents_collapsed,
         }
     }
 }

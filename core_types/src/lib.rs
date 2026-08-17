@@ -57,8 +57,102 @@ pub enum DaemonRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MousePosition {
-    Absolute { x: i32, y: i32 },
+    Absolute { x: Coord, y: Coord },
     Current,
+}
+
+/// a coordinate value: a fixed number or a `$name` variable reference,
+/// resolved at playback time; a missing variable reads as 0.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Coord {
+    Const(i32),
+    Var(String),
+}
+
+/// a runtime variable value: a whole number, a decimal, or text, coerced via
+/// [`Value::as_i64`] / [`Value::as_f64`] / [`Value::as_text`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Value {
+    Number(i64),
+    Float(f64),
+    Text(String),
+}
+
+impl Value {
+    /// the value as a whole number: decimals truncate toward zero, text
+    /// parses with whitespace ignored; unparseable text reads as 0.
+    pub fn as_i64(&self) -> i64 {
+        self.as_i64_opt().unwrap_or(0)
+    }
+
+    /// the value as a whole number when it is one, or fully numeric text.
+    pub fn as_i64_opt(&self) -> Option<i64> {
+        match self {
+            Value::Number(n) => Some(*n),
+            Value::Float(f) => Some(*f as i64),
+            Value::Text(s) => s.trim().parse().ok(),
+        }
+    }
+
+    /// the value as a decimal; numeric text parses.
+    pub fn as_f64(&self) -> f64 {
+        self.as_f64_opt().unwrap_or(0.0)
+    }
+
+    pub fn as_f64_opt(&self) -> Option<f64> {
+        match self {
+            Value::Number(n) => Some(*n as f64),
+            Value::Float(f) => Some(*f),
+            Value::Text(s) => s.trim().parse().ok(),
+        }
+    }
+
+    /// the value as text; integral decimals render without a trailing `.0`.
+    pub fn as_text(&self) -> String {
+        match self {
+            Value::Number(n) => n.to_string(),
+            Value::Float(f) => {
+                if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                    format!("{}", *f as i64)
+                } else {
+                    f.to_string()
+                }
+            }
+            Value::Text(s) => s.clone(),
+        }
+    }
+}
+
+/// a value for variable commands: a literal (number or text) or a variable reference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Operand {
+    Var(String),
+    Literal(Value),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompareOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Contains,
+}
+
+impl CompareOp {
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            CompareOp::Eq => "==",
+            CompareOp::Ne => "!=",
+            CompareOp::Lt => "<",
+            CompareOp::Le => "<=",
+            CompareOp::Gt => ">",
+            CompareOp::Ge => ">=",
+            CompareOp::Contains => "contains",
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -156,7 +250,7 @@ impl Modifiers {
     }
 
     pub fn is_modifier_code(code: u16) -> bool {
-        return matches!(
+        matches!(
             code,
             KEY_LEFTCTRL_CODE
                 | KEY_RIGHTCTRL_CODE
@@ -200,12 +294,12 @@ pub enum MacroButton {
     Middle,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MacroEvent {
     Delay(u64),
     MouseMove {
-        x: i32,
-        y: i32,
+        x: Coord,
+        y: Coord,
     },
     Click {
         position: MousePosition,
@@ -284,6 +378,10 @@ pub struct PlaybackOptions {
     pub smart_path: SmartPathOptions,
 }
 
+/// current macro file format version; bump when a command's serialized form changes.
+// TODO: add a migration path for loading macros saved with older format versions.
+pub const CURRENT_FORMAT_VERSION: u8 = 8;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Macro {
     pub name: String,
@@ -295,7 +393,7 @@ impl Macro {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            version: 3,
+            version: CURRENT_FORMAT_VERSION,
             commands: Vec::new(),
         }
     }
@@ -315,14 +413,49 @@ impl Macro {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MacroCommand {
     Action(MacroEvent),
-    IfPixelColor { x: i32, y: i32, r: u8, g: u8, b: u8, tolerance: u8 },
-    IfImageFound { target_image_path: String, similarity_threshold: f32, move_cursor_if_found: bool, trigger_if_not_found: bool, region: Option<(i32, i32, i32, i32)> },
+    IfPixelColor {
+        x: Coord,
+        y: Coord,
+        r: u8,
+        g: u8,
+        b: u8,
+        tolerance: u8,
+    },
+    IfImageFound {
+        target_image_path: String,
+        similarity_threshold: f32,
+        move_cursor_if_found: bool,
+        trigger_if_not_found: bool,
+        region: Option<(i32, i32, i32, i32)>,
+        store_x: Option<String>,
+        store_y: Option<String>,
+    },
+    /// searches `region` (None = whole screen) for the largest connected
+    /// region within `tolerance` (0-100, Euclidean RGB distance) of (r,g,b);
+    /// a match stores the center via store_x/store_y and size via store_w/store_h.
+    IfColorFound {
+        region: Option<(i32, i32, i32, i32)>,
+        r: u8,
+        g: u8,
+        b: u8,
+        tolerance: u8,
+        min_width: u32,
+        min_height: u32,
+        move_cursor_if_found: bool,
+        store_x: Option<String>,
+        store_y: Option<String>,
+        store_w: Option<String>,
+        store_h: Option<String>,
+    },
     Else,
     EndIf,
-    Loop { count: u32 },
+    Loop {
+        /// number of iterations; a `Var` resolves to its runtime value.
+        count: Operand,
+    },
     EndLoop,
     PlayMacro(String),
     Label(String),
@@ -333,10 +466,40 @@ pub enum MacroCommand {
         args: String,
         run_as_admin: bool,
     },
+    SetVariable {
+        target: String,
+        value: Operand,
+    },
+    /// evaluates a free-form expression into a variable: `$` vars, decimals,
+    /// quoted text, `+ - * / %`, `.` text joins, comparisons, `cond ? a : b`,
+    /// and functions `abs floor ceil round sqrt min max random`.
+    Calculate {
+        target: String,
+        expression: String,
+    },
+    /// compares operands; a missing variable reads as 0. `==`/`!=`/`contains`
+    /// compare text forms; ordering ops compare numerically when both sides
+    /// are numbers, lexicographically otherwise.
+    IfCompare {
+        left: Operand,
+        op: CompareOp,
+        right: Operand,
+    },
+    /// sleeps `duration_ms`, which may be a `$` variable (e.g. `$cooldown_ms`).
+    Delay {
+        duration_ms: Operand,
+    },
+    /// sets the clipboard to the operand's text form (text/plain, UTF-8).
+    SetClipboard {
+        text: Operand,
+    },
+    /// reads the clipboard text into a variable; an empty or non-text clipboard reads as `""`.
+    GetClipboard {
+        target: String,
+    },
+    /// a note attached to the macro; never executed, only visible in the editor and
+    /// kept in the command list so it moves and saves with its steps.
+    Comment(String),
     // TODO: add BreakLoop action for dynamically escaping loops.
     // TODO: add ExitMacro action for halting execution early.
-    //
-    // priority:
-    // TODO: add varaibles to save coord x and coord y.
-    // TODO: add "if compare" action for comparing 2 variables using comparison operator.
 }

@@ -1,23 +1,20 @@
-//! the PipeWire capture stream: format negotiation, the `process` callback
-//! that reads frames on arrival, and the mainloop thread that serves requests.
-
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use pipewire::buffer::Buffer as PwBuffer;
 use pipewire::context::ContextBox;
 use pipewire::keys;
 use pipewire::main_loop::MainLoopBox;
 use pipewire::properties::properties;
 use pipewire::spa::buffer::DataType;
+use pipewire::spa::param::ParamType;
 use pipewire::spa::param::format::{FormatProperties, MediaSubtype, MediaType};
 use pipewire::spa::param::video::{VideoFormat, VideoInfoRaw};
-use pipewire::spa::param::ParamType;
 use pipewire::spa::pod::serialize::PodSerializer;
-use pipewire::spa::pod::{object, property, ChoiceValue, Pod, Property, PropertyFlags, Value};
+use pipewire::spa::pod::{ChoiceValue, Pod, Property, PropertyFlags, Value, object, property};
 use pipewire::spa::support::system::IoFlags;
 use pipewire::spa::utils::{
     Choice, ChoiceEnum, ChoiceFlags, Direction, Fraction, Rectangle, SpaTypes,
@@ -26,10 +23,11 @@ use pipewire::stream::{StreamBox, StreamFlags, StreamState};
 
 use super::gbm::GbmSession;
 use super::pixel::PixelFormat;
-use super::state::{request_coverable, request_union, serve_requests, CaptureRequest, CaptureState};
+use super::state::{
+    CaptureRequest, CaptureState, request_coverable, request_union, serve_requests,
+};
 
-/// AMD 64K-tiling DRM modifiers (DRM_FORMAT_MOD_AMD_64K | gfx9/gfx10 codes),
-/// commonly used by wlroots-based portals; LINEAR is always included.
+/// AMD 64K-tiling DRM modifiers (gfx9/gfx10 codes) used by wlroots-based portals; LINEAR is always included.
 const AMD_MODIFIERS: [i64; 20] = [
     0x1000000000000000, // GFX9_64K_R_X
     0x1000000000000001, // GFX9_64K_S_X
@@ -53,10 +51,8 @@ const AMD_MODIFIERS: [i64; 20] = [
     0x1000000000000013, // GFX10_64K_R_XY_2X1_V_XY
 ];
 
-/// video.modifier property: a non-fixated choice, LINEAR default followed by
-/// the common AMD 64K modifiers. not marked mandatory: on renegotiation the
-/// portal may advertise a format without this property (SHM fallback), and a
-/// mandatory filter property that is missing in the peer param rejects it.
+/// video.modifier: non-fixated choice (LINEAR default, then AMD 64K). not
+/// mandatory: a mandatory filter property missing in the peer param rejects it.
 fn modifier_property() -> Property {
     let mut alternatives = vec![0i64]; // LINEAR
     alternatives.extend_from_slice(&AMD_MODIFIERS);
@@ -73,10 +69,8 @@ fn modifier_property() -> Property {
     }
 }
 
-/// builds one EnumFormat param per supported format. PipeWire 1.6.x portals
-/// reject a single param advertising multiple formats via a Choice, so every
-/// format is sent as its own fixed-format param (as FFmpeg's pw grab does).
-/// the video.modifier + framerate properties are required by dmabuf portals.
+/// one EnumFormat param per format: PipeWire 1.6.x portals reject a single
+/// param advertising multiple formats via a Choice (as FFmpeg's pw grab does).
 fn build_format_params() -> Result<Vec<Vec<u8>>> {
     const FORMATS: [VideoFormat; 6] = [
         VideoFormat::BGRA,
@@ -91,29 +85,26 @@ fn build_format_params() -> Result<Vec<Vec<u8>>> {
         let obj = object!(
             SpaTypes::ObjectParamFormat,
             ParamType::EnumFormat,
-            property!(
-                FormatProperties::MediaType,
-                Id,
-                MediaType::Video
-            ),
-            property!(
-                FormatProperties::MediaSubtype,
-                Id,
-                MediaSubtype::Raw
-            ),
-            property!(
-                FormatProperties::VideoFormat,
-                Id,
-                fmt
-            ),
+            property!(FormatProperties::MediaType, Id, MediaType::Video),
+            property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
+            property!(FormatProperties::VideoFormat, Id, fmt),
             property!(
                 FormatProperties::VideoSize,
                 Choice,
                 Range,
                 Rectangle,
-                Rectangle { width: 1920, height: 1080 },
-                Rectangle { width: 1, height: 1 },
-                Rectangle { width: 16384, height: 16384 }
+                Rectangle {
+                    width: 1920,
+                    height: 1080
+                },
+                Rectangle {
+                    width: 1,
+                    height: 1
+                },
+                Rectangle {
+                    width: 16384,
+                    height: 16384
+                }
             ),
             property!(
                 FormatProperties::VideoFramerate,
@@ -126,22 +117,26 @@ fn build_format_params() -> Result<Vec<Vec<u8>>> {
             ),
             modifier_property(),
         );
-        let values = PodSerializer::serialize(std::io::Cursor::new(Vec::new()), &Value::Object(obj))
-            .map_err(|e| anyhow!("failed to serialize format pod: {e}"))?
-            .0
-            .into_inner();
+        let values =
+            PodSerializer::serialize(std::io::Cursor::new(Vec::new()), &Value::Object(obj))
+                .map_err(|e| anyhow!("failed to serialize format pod: {e}"))?
+                .0
+                .into_inner();
         params.push(values);
     }
     Ok(params)
 }
 
-/// consumes one stream buffer: reads the bounding box of all pending requests
-/// into `s.retained` and bumps the frame sequence. returns whether the frame
-/// was captured.
+/// consumes one stream buffer: reads the pending requests' bounding box into
+/// `s.retained` and bumps the frame sequence.
 fn read_buffer(gbm: &GbmSession, buffer: &mut PwBuffer<'_>, s: &mut CaptureState) -> bool {
-    let Some((fw, fh)) = s.frame else { return false };
+    let Some((fw, fh)) = s.frame else {
+        return false;
+    };
     let Some(fmt) = s.format else { return false };
-    let Some(data) = buffer.datas_mut().first_mut() else { return false };
+    let Some(data) = buffer.datas_mut().first_mut() else {
+        return false;
+    };
 
     let chunk_size = data.chunk().size();
     if chunk_size == 0 {
@@ -154,7 +149,24 @@ fn read_buffer(gbm: &GbmSession, buffer: &mut PwBuffer<'_>, s: &mut CaptureState
     };
     let offset = data.chunk().offset();
 
-    let region = request_union(s, fw, fh);
+    // a `full` request reads the whole frame; in continuous mode an empty
+    // pending set re-reads the last used region instead of the whole screen.
+    let region = if s.pending.iter().any(|r| r.full) {
+        None
+    } else {
+        request_union(s, fw, fh).or({
+            if s.continuous && s.retained_w > 0 {
+                Some((
+                    s.retained_origin.0,
+                    s.retained_origin.1,
+                    s.retained_w,
+                    s.retained_h,
+                ))
+            } else {
+                None
+            }
+        })
+    };
     let read_start = Instant::now();
     let ok = match data.type_() {
         DataType::DmaBuf => {
@@ -162,9 +174,19 @@ fn read_buffer(gbm: &GbmSession, buffer: &mut PwBuffer<'_>, s: &mut CaptureState
             if raw_fd < 0 {
                 false
             } else {
-                gbm.read_frame(raw_fd, fmt.fourcc(), fw, fh, stride as u32, offset, s.modifier, region, &mut s.retained)
-                    .map_err(|e| log::warn!("frame readback failed: {e:#}"))
-                    .is_ok()
+                gbm.read_frame(
+                    raw_fd,
+                    fmt.fourcc(),
+                    fw,
+                    fh,
+                    stride as u32,
+                    offset,
+                    s.modifier,
+                    region,
+                    &mut s.retained,
+                )
+                .map_err(|e| log::warn!("frame readback failed: {e:#}"))
+                .is_ok()
             }
         }
         DataType::MemPtr => match data.data() {
@@ -204,14 +226,53 @@ fn read_buffer(gbm: &GbmSession, buffer: &mut PwBuffer<'_>, s: &mut CaptureState
         s.retained_fmt = fmt;
         s.seq += 1;
         s.retained_seq = s.seq;
-        log::debug!(
-            "frame readback took {:.3}ms (region {}x{})",
-            read_start.elapsed().as_secs_f64() * 1000.0,
-            s.retained_w,
-            s.retained_h
-        );
+        s.retained_at = Some(Instant::now());
+        // continuous-mode idle reads run on every frame; keep them quiet.
+        if s.pending.is_empty() {
+            log::trace!(
+                "frame readback took {:.3}ms (region {}x{}, continuous idle)",
+                read_start.elapsed().as_secs_f64() * 1000.0,
+                s.retained_w,
+                s.retained_h
+            );
+        } else {
+            log::debug!(
+                "frame readback took {:.3}ms (region {}x{})",
+                read_start.elapsed().as_secs_f64() * 1000.0,
+                s.retained_w,
+                s.retained_h
+            );
+        }
     }
     ok
+}
+
+/// serves coverable pending requests, at most once per retained frame
+/// (`last_served_seq`); the rest stay pending for the next read's union.
+fn serve_ready(state: &Arc<Mutex<CaptureState>>) -> bool {
+    let mut s = state.lock().unwrap();
+    if s.pending.is_empty() || s.retained_seq == 0 || s.retained_seq <= s.last_served_seq {
+        return false;
+    }
+    let pending = std::mem::take(&mut s.pending);
+    let mut servable = Vec::with_capacity(pending.len());
+    let mut keep = Vec::with_capacity(pending.len());
+    for req in pending {
+        if request_coverable(&s, &req) {
+            servable.push(req);
+        } else {
+            keep.push(req);
+        }
+    }
+    if servable.is_empty() {
+        s.pending = keep;
+        return false;
+    }
+    s.pending = keep;
+    s.last_served_seq = s.retained_seq;
+    drop(s);
+    serve_requests(state, servable);
+    true
 }
 
 pub(super) fn pw_capture_thread(
@@ -227,8 +288,7 @@ pub(super) fn pw_capture_thread(
     let context = ContextBox::new(mainloop.loop_(), None)?;
     let core = context.connect_fd(fd, None)?;
 
-    // self-pipe so new requests wake the loop immediately instead of waiting
-    // out the poll timeout below. the write end lives in `Capturer`.
+    // self-pipe so new requests wake the loop immediately; the write end lives in `Capturer`.
     let wake_fd = unsafe { OwnedFd::from_raw_fd(wake_rfd) };
     let _wake_source = mainloop.loop_().add_io(wake_fd, IoFlags::IN, |fd| {
         let mut byte = [0u8; 1];
@@ -287,13 +347,12 @@ pub(super) fn pw_capture_thread(
             );
         })
         .process(move |stream, _| {
-            // always consume and release, even with no pending requests: the
-            // portal produces frames in response to releases, so this keeps
-            // the stream warm and a fresh frame in flight for the next
-            // request (no per-request round trip when idle).
+            // always consume and release, even with no pending requests, so
+            // the portal keeps producing and a fresh frame stays in flight.
+            // while `continuous` is set, every frame is read into the retained buffer.
             let mut s = process_state.lock().unwrap();
             match stream.dequeue_buffer() {
-                Some(mut buffer) if !s.pending.is_empty() => {
+                Some(mut buffer) if !s.pending.is_empty() || s.continuous => {
                     read_buffer(&callback_gbm, &mut buffer, &mut s);
                 }
                 Some(_) => {}
@@ -322,67 +381,44 @@ pub(super) fn pw_capture_thread(
             let pending = {
                 let mut s = state.lock().unwrap();
                 let reqs = std::mem::take(&mut s.pending);
-                log::error!("capture stream failed, dropping {} pending request(s): {err}", reqs.len());
+                log::error!(
+                    "capture stream failed, dropping {} pending request(s): {err}",
+                    reqs.len()
+                );
                 reqs
             };
             for req in pending {
-                let _ = req.reply.try_send(Err(format!("capture stream failed: {err}")));
+                let _ = req
+                    .reply
+                    .try_send(Err(format!("capture stream failed: {err}")));
             }
             break;
         }
         while let Ok(req) = rx.try_recv() {
             state.lock().unwrap().pending.push(req);
         }
-        let to_serve = {
+
+        // serve pass: 1. the retained frame is newer than the last serve, so
+        // answer what it covers; unanswerable requests stay pending, since
+        // serving the stale retained frame after idle would return stale
+        // content. 2. otherwise a frame may already be queued with no
+        // `process` callback firing, so consume it directly instead of the poll.
+        if !serve_ready(&state) {
             let mut s = state.lock().unwrap();
-            if s.pending.is_empty() || s.retained_seq == 0 {
-                None
-            } else if s.retained_seq > s.last_served_seq {
-                // a fresh frame arrived since the last serve. only requests
-                // the retained buffer can answer are served now; the rest
-                // stay pending until a frame covers them. every request
-                // waits for a new frame: serving the retained frame after
-                // idle would keep returning stale screen content.
-                let pending = std::mem::take(&mut s.pending);
-                let mut servable = Vec::with_capacity(pending.len());
-                let mut keep = Vec::with_capacity(pending.len());
-                for req in pending {
-                    if request_coverable(&s, &req) {
-                        servable.push(req);
-                    } else {
-                        keep.push(req);
-                    }
+            if !s.pending.is_empty()
+                && s.retained_seq == s.last_served_seq
+                && let Some(mut buffer) = stream.dequeue_buffer()
+            {
+                let ok = read_buffer(&process_gbm, &mut buffer, &mut s);
+                log::debug!("capture: consumed an already-queued frame (ok={ok})");
+                drop(s);
+                if ok {
+                    serve_ready(&state);
                 }
-                s.pending = keep;
-                s.last_served_seq = s.retained_seq;
-                Some(servable)
-            } else {
-                None
             }
-        };
-        if let Some(reqs) = to_serve.filter(|reqs| !reqs.is_empty()) {
-            serve_requests(&state, reqs);
         }
-        // a pending request that the retained buffer cannot answer needs a
-        // fresher frame. the stream idles (with a buffer queued) when nothing
-        // was consumed for a while and no `process` callback would fire, so
-        // consume any queued buffer directly from the mainloop.
-        let _ = {
-            let mut s = state.lock().unwrap();
-            if !s.pending.is_empty() && s.retained_seq == s.last_served_seq {
-                if let Some(mut buffer) = stream.dequeue_buffer() {
-                    let ok = read_buffer(&process_gbm, &mut buffer, &mut s);
-                    log::debug!("capture: consumed an already-queued frame (ok={ok})");
-                    ok
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        };
-        // new requests wake the loop instantly via the self-pipe; this timeout
-        // only bounds how often the stream is serviced while idle.
+
+        // new requests wake the loop instantly via the self-pipe; this timeout only bounds idle servicing.
         mainloop.loop_().iterate(Duration::from_millis(5));
     }
 
