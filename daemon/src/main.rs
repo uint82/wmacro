@@ -1,4 +1,5 @@
-use wmacro_core_types::{DaemonEvent, DaemonRequest, HardwareEvent, HotkeyEvent};
+//! daemon binary: listens on a unix socket, replays input via `uinput`, and records input from `evdev`.
+
 use log::{error, info};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -10,6 +11,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use wmacro_core_types::{DaemonEvent, DaemonRequest, HardwareEvent, HotkeyEvent};
 
 pub mod evdev_listener;
 pub mod uinput;
@@ -49,24 +51,25 @@ fn init_backend() -> Option<uinput::UinputBackend> {
 }
 
 fn bind_socket(socket_path: &str) -> UnixListener {
-    if let Some(parent) = std::path::Path::new(socket_path).parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent).expect("Failed to create socket directory");
+    if let Some(parent) = std::path::Path::new(socket_path).parent()
+        && !parent.exists()
+    {
+        // TODO: propagate startup errors as Results instead of panicking here.
+        std::fs::create_dir_all(parent).expect("Failed to create socket directory");
 
-            if let (Ok(uid), Ok(gid)) = (std::env::var("SUDO_UID"), std::env::var("SUDO_GID")) {
-                let mut dir_perms = fs::metadata(parent).unwrap().permissions();
-                dir_perms.set_mode(0o700);
-                fs::set_permissions(parent, dir_perms).unwrap();
+        if let (Ok(uid), Ok(gid)) = (std::env::var("SUDO_UID"), std::env::var("SUDO_GID")) {
+            let mut dir_perms = fs::metadata(parent).unwrap().permissions();
+            dir_perms.set_mode(0o700);
+            fs::set_permissions(parent, dir_perms).unwrap();
 
-                let _ = Command::new("chown")
-                    .arg(format!("{}:{}", uid, gid))
-                    .arg(parent)
-                    .status();
-            } else {
-                let mut dir_perms = fs::metadata(parent).unwrap().permissions();
-                dir_perms.set_mode(0o755);
-                fs::set_permissions(parent, dir_perms).unwrap();
-            }
+            let _ = Command::new("chown")
+                .arg(format!("{}:{}", uid, gid))
+                .arg(parent)
+                .status();
+        } else {
+            let mut dir_perms = fs::metadata(parent).unwrap().permissions();
+            dir_perms.set_mode(0o755);
+            fs::set_permissions(parent, dir_perms).unwrap();
         }
     }
 
@@ -155,6 +158,7 @@ fn forward_events(
         }
 
         if !hw.got_any && !hotkey.got_any {
+            // TODO: block on the channels with a timeout instead of this 1ms sleep-poll.
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
@@ -254,17 +258,14 @@ fn handle_request(
         DaemonRequest::Click {
             target_x,
             target_y,
-            current_x,
-            current_y,
             button,
             click_type,
             hold_duration_ms,
             move_cursor,
+            ..
         } => backend.click(
             target_x,
             target_y,
-            current_x,
-            current_y,
             &button,
             &click_type,
             hold_duration_ms,

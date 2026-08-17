@@ -1,7 +1,9 @@
-use eframe::egui;
-use crate::state::{SharedState, ModalAlert};
-use crate::ui::theme::ThemePalette;
+//! the warning alert: shows a dismissible warning modal.
+
 use super::base_alert::draw_base_alert;
+use crate::state::{ModalAlert, SharedState};
+use crate::ui::theme::ThemePalette;
+use eframe::egui;
 
 pub fn render(
     ctx: &egui::Context,

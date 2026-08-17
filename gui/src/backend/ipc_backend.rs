@@ -1,3 +1,5 @@
+//! `ClickBackend` implementation that forwards input requests to the daemon over a unix socket and relays daemon events back.
+
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::Sender;
@@ -5,7 +7,7 @@ use std::time::Duration;
 
 use wmacro_core_types::{ClickButton, ClickType, DaemonEvent, DaemonRequest};
 
-use crate::backend::{keymap, ClickBackend};
+use crate::backend::{ClickBackend, keymap};
 
 const DAEMON_SOCKET_PATH: &str = "/run/wmacro/wmacro.sock";
 const KEY_CODE_SHIFT: u16 = 42;
@@ -17,6 +19,7 @@ pub struct IpcBackend {
 
 impl IpcBackend {
     pub fn new(event_tx: Sender<DaemonEvent>) -> Result<Self, String> {
+        // a clone of the socket feeds the event listener thread; the original is kept exclusively for requests.
         let socket = UnixStream::connect(DAEMON_SOCKET_PATH)
             .map_err(|e| format!("Failed to connect to Daemon at {DAEMON_SOCKET_PATH}: {e}"))?;
 
@@ -30,10 +33,13 @@ impl IpcBackend {
     }
 
     fn send_req(&mut self, req: DaemonRequest) -> Result<(), String> {
+        // newline-delimited JSON framing matches the daemon's line-based reader.
         let mut bytes = serde_json::to_vec(&req)
             .map_err(|e| format!("Failed to serialize daemon request: {e}"))?;
         bytes.push(b'\n');
-        self.socket.write_all(&bytes).map_err(|e| format!("Failed to write daemon request: {e}"))
+        self.socket
+            .write_all(&bytes)
+            .map_err(|e| format!("Failed to write daemon request: {e}"))
     }
 
     fn type_character(&mut self, c: char, code: u16, shift: bool) -> Result<(), String> {
@@ -52,6 +58,7 @@ impl IpcBackend {
         })?;
 
         // TODO: use robust synchronization method instead of sleep if possible.
+        // the sleeps let the daemon's uinput writes land in order; durations are empirical, tuned for reliable typing on slow boards.
         std::thread::sleep(Duration::from_millis(2));
 
         self.send_req(DaemonRequest::KeyUp {
@@ -118,8 +125,8 @@ impl ClickBackend for IpcBackend {
 
     fn type_text(&mut self, text: &str) -> Result<(), String> {
         for c in text.chars() {
-            let (code, shift) = keymap::char_to_evdev(c)
-                .ok_or_else(|| format!("Unsupported character: {c:?}"))?;
+            let (code, shift) =
+                keymap::char_to_evdev(c).ok_or_else(|| format!("Unsupported character: {c:?}"))?;
             self.type_character(c, code, shift)?;
         }
         Ok(())
@@ -158,6 +165,7 @@ impl ClickBackend for IpcBackend {
 }
 
 fn spawn_daemon_event_listener(socket: UnixStream, event_tx: Sender<DaemonEvent>) {
+    // one long-lived reader keeps events flowing; each parse failure is logged and skipped so a single bad line cannot kill the stream.
     std::thread::spawn(move || {
         let mut reader = BufReader::new(socket);
         let mut line = String::new();

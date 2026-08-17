@@ -1,9 +1,11 @@
+//! image utilities: target caching, screen capture, and template matching.
+
 pub mod cache;
 pub mod capture;
 pub mod fft;
 pub mod integral;
-pub mod math;
 pub mod matching;
+pub mod math;
 pub mod outputs;
 pub mod wayland;
 
@@ -25,7 +27,10 @@ pub fn find_image(
     log::debug!("--- [TIMING] Starting find_image for {} ---", target_path);
     let t_start = std::time::Instant::now();
     let target = load_target_cached(target_path)?;
-    log::debug!("[TIMING] Load/cache target image took: {:?}", t_start.elapsed());
+    log::debug!(
+        "[TIMING] Load/cache target image took: {:?}",
+        t_start.elapsed()
+    );
 
     let t_capture = std::time::Instant::now();
     let (search, offset_x, offset_y) = if let Some((l, t, w, h)) = region {
@@ -35,10 +40,16 @@ pub fn find_image(
         let img = capture_screen_native()?;
         (img, 0u32, 0u32)
     };
-    log::debug!("[TIMING] Total capture pipeline took: {:?}", t_capture.elapsed());
+    log::debug!(
+        "[TIMING] Total capture pipeline took: {:?}",
+        t_capture.elapsed()
+    );
 
     let res = match_in_memory(&search, &target, offset_x, offset_y, threshold);
-    log::debug!("--- [TIMING] Finished find_image in {:?} ---", t_start.elapsed());
+    log::debug!(
+        "--- [TIMING] Finished find_image in {:?} ---",
+        t_start.elapsed()
+    );
     res
 }
 

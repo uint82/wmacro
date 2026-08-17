@@ -26,5 +26,8 @@
   "col_end_loop": "#F5C2E7",
   "col_label": "#94E2D5",
   "col_goto": "#94E2D5",
-  "col_import_saved_macro": "#6C7086"
+  "col_import_saved_macro": "#6C7086",
+  "col_var": "#E6B9A8",
+  "col_calc": "#A8C1E6",
+  "col_clipboard": "#8FD0B8"
 }

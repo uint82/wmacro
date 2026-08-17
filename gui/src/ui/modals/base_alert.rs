@@ -1,7 +1,9 @@
-use eframe::egui;
-use crate::state::{ModalAlert, ModalAction};
+//! shared drawing code for alert dialogs: backdrop, window frame, and dismiss handling.
+
+use crate::state::{ModalAction, ModalAlert};
+use crate::ui::modals::{apply_modal_visuals, draw_modal_backdrop};
 use crate::ui::theme::ThemePalette;
-use crate::ui::modals::{draw_modal_backdrop, apply_modal_visuals};
+use eframe::egui;
 
 pub fn draw_base_alert(
     ctx: &egui::Context,
@@ -27,12 +29,9 @@ pub fn draw_base_alert(
             let saved_visuals = apply_modal_visuals(ui, palette);
 
             ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(&alert.message)
-                    .color(palette.text_muted)
-            );
+            ui.label(egui::RichText::new(&alert.message).color(palette.text_muted));
 
-            if let Some(note_text) = &alert.note {
+        if let Some(note_text) = &alert.note {
                 ui.add_space(12.0);
                 egui::Frame::NONE
                     .fill(palette.bg_element)
@@ -52,17 +51,23 @@ pub fn draw_base_alert(
                                 ui.add_space(available - 32.0);
                             }
 
-                            let copied = alert.copied_at
+                            let copied = alert
+                                .copied_at
                                 .map(|t| t.elapsed().as_secs() < 2)
                                 .unwrap_or(false);
 
                             let (btn_icon, hover_text, color) = if copied {
-                                (egui_phosphor::regular::CHECK, "Copied!", palette.accent_success)
+                                (
+                                    egui_phosphor::regular::CHECK,
+                                    "Copied!",
+                                    palette.accent_success,
+                                )
                             } else {
                                 (egui_phosphor::regular::COPY, "Copy", palette.text_primary)
                             };
 
-                            if ui.button(egui::RichText::new(btn_icon).size(16.0).color(color))
+                            if ui
+                                .button(egui::RichText::new(btn_icon).size(16.0).color(color))
                                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                                 .on_hover_text(hover_text)
                                 .clicked()
@@ -80,7 +85,7 @@ pub fn draw_base_alert(
                 ui.label(
                     egui::RichText::new(footer)
                         .color(palette.text_muted)
-                        .size(11.0)
+                        .size(11.0),
                 );
             }
 
@@ -104,25 +109,27 @@ pub fn draw_base_alert(
                         let (btn_label, action) = &alert.actions[action_index];
 
                         let (bg_color, text_color) = match action {
-                            ModalAction::SaveAndQuit =>
-                                (palette.bg_element, palette.text_primary),
-                            ModalAction::QuitWithoutSaving
-                            | ModalAction::Quit =>
-                                (palette.accent_danger, palette.accent_danger_fg),
+                            ModalAction::SaveAndQuit => (palette.bg_element, palette.text_primary),
+                            ModalAction::QuitWithoutSaving | ModalAction::Quit => {
+                                (palette.accent_danger, palette.accent_danger_fg)
+                            }
                             _ => (palette.bg_element, palette.text_primary),
                         };
 
                         let saved_visuals = ui.visuals().clone();
                         ui.visuals_mut().widgets.inactive.weak_bg_fill = bg_color;
-                        ui.visuals_mut().widgets.hovered.weak_bg_fill = bg_color.linear_multiply(1.2);
-                        ui.visuals_mut().widgets.active.weak_bg_fill = bg_color.linear_multiply(0.8);
+                        ui.visuals_mut().widgets.hovered.weak_bg_fill =
+                            bg_color.linear_multiply(1.2);
+                        ui.visuals_mut().widgets.active.weak_bg_fill =
+                            bg_color.linear_multiply(0.8);
 
                         let btn = egui::Button::new(
-                            egui::RichText::new(btn_label).strong().color(text_color)
+                            egui::RichText::new(btn_label).strong().color(text_color),
                         )
-                        .min_size(egui::vec2(80.0, 28.0));
+                        .min_size(egui::vec2(80.0, ui.spacing().interact_size.y * 1.2));
 
-                        if ui.add(btn)
+                        if ui
+                            .add(btn)
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .clicked()
                         {
@@ -138,6 +145,7 @@ pub fn draw_base_alert(
                 });
             }
 
+            // TODO: unify this per-button visual override with the commit buttons in the other modals.
             if alert.dismissible && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 close = true;
             }

@@ -1,9 +1,13 @@
+//! toolbar with record, play, pause, and stop controls for the current macro.
+
 use super::IdeState;
 use super::Modal;
 use super::components::status_chip;
+use super::settings::save_settings;
 use crate::macro_engine::player::spawn_player;
 use crate::macro_engine::recorder::{start_recording, stop_recording};
 use crate::state::SharedState;
+use crate::ui::theme::ThemePalette;
 use eframe::egui;
 use std::sync::atomic::Ordering;
 
@@ -16,6 +20,7 @@ struct ToolbarState {
 }
 
 fn snapshot_toolbar_state(state: &SharedState) -> ToolbarState {
+    // one short lock at the top of the frame so all buttons agree on the same state instead of each polling the mutex independently.
     let s = state.lock().unwrap();
     let has_commands = s
         .macro_state
@@ -91,13 +96,12 @@ fn render_record_button(
     let button = egui::Button::new(
         egui::RichText::new(label)
             .color(palette.accent_danger_fg)
-            .strong()
-            .size(14.0),
+            .strong(),
     )
     .fill(palette.accent_danger)
     .stroke(egui::Stroke::new(1.0_f32, palette.accent_danger))
     .corner_radius(rounding)
-    .min_size(egui::vec2(90.0, 36.0));
+    .min_size(egui::vec2(86.0, 36.0));
 
     let clicked = ui
         .add_enabled(!toolbar.playing, button)
@@ -116,7 +120,8 @@ fn handle_record_click(state: &SharedState, ide: &mut IdeState, toolbar: &Toolba
     }
 
     if toolbar.has_commands {
-        ide.modal = Modal::OverwriteWarning;
+        // recording over an existing macro would silently clobber it, so ask first via the overwrite modal.
+        ide.modal = Modal::Widget(Box::new(crate::ui::modals::overwrite::OverwriteModal));
         return;
     }
 
@@ -147,11 +152,11 @@ fn render_record_pause_button(
         palette.text_primary
     };
 
-    let button = egui::Button::new(egui::RichText::new(label).color(fg).strong().size(13.0))
+    let button = egui::Button::new(egui::RichText::new(label).color(fg).strong())
         .fill(fill)
         .stroke(egui::Stroke::new(1.0_f32, palette.border))
         .corner_radius(rounding)
-        .min_size(egui::vec2(85.0, 36.0));
+        .min_size(egui::vec2(86.0, 36.0));
 
     let clicked = ui
         .add(button)
@@ -193,11 +198,11 @@ fn render_play_button(
         format!("{}  Play", egui_phosphor::regular::PLAY)
     };
 
-    let button = egui::Button::new(egui::RichText::new(label).color(fg).strong().size(14.0))
+    let button = egui::Button::new(egui::RichText::new(label).color(fg).strong())
         .fill(fill)
         .stroke(stroke)
         .corner_radius(rounding)
-        .min_size(egui::vec2(80.0, 36.0));
+        .min_size(egui::vec2(86.0, 36.0));
 
     let enabled = !toolbar.recording && (toolbar.has_commands || toolbar.playing);
     let clicked = ui
@@ -212,6 +217,8 @@ fn render_play_button(
 
 fn handle_play_click(state: &SharedState, toolbar: &ToolbarState) {
     if toolbar.playing {
+        // stopping is cooperative: flip the kill flag and let the player
+        // thread wind down at its next checkpoint.
         let mut s = state.lock().unwrap();
         if let Some(kill) = s.macro_state.play_kill.take() {
             kill.store(true, Ordering::Relaxed);
@@ -252,11 +259,11 @@ fn render_play_pause_button(
         palette.text_primary
     };
 
-    let button = egui::Button::new(egui::RichText::new(label).color(fg).strong().size(13.0))
+    let button = egui::Button::new(egui::RichText::new(label).color(fg).strong())
         .fill(fill)
         .stroke(egui::Stroke::new(1.0_f32, palette.border))
         .corner_radius(rounding)
-        .min_size(egui::vec2(85.0, 36.0));
+        .min_size(egui::vec2(86.0, 36.0));
 
     let clicked = ui
         .add(button)
@@ -282,13 +289,12 @@ fn render_append_button(
     let button = egui::Button::new(
         egui::RichText::new(format!("{} Append", egui_phosphor::regular::PLUS))
             .color(palette.text_primary)
-            .strong()
-            .size(14.0),
+            .strong(),
     )
     .fill(palette.bg_element_alt)
     .stroke(egui::Stroke::new(1.0_f32, palette.border))
     .corner_radius(rounding)
-    .min_size(egui::vec2(90.0, 36.0));
+    .min_size(egui::vec2(86.0, 36.0));
 
     let enabled = !toolbar.playing && !toolbar.recording && toolbar.has_commands;
     let clicked = ui
@@ -311,13 +317,12 @@ fn render_settings_button(
     let button = egui::Button::new(
         egui::RichText::new(format!("{} Settings", egui_phosphor::regular::GEAR))
             .color(palette.text_primary)
-            .strong()
-            .size(14.0),
+            .strong(),
     )
     .fill(palette.bg_element_alt)
     .stroke(egui::Stroke::new(1.0_f32, palette.border))
     .corner_radius(rounding)
-    .min_size(egui::vec2(90.0, 36.0));
+    .min_size(egui::vec2(86.0, 36.0));
 
     let clicked = ui
         .add(button)
@@ -326,5 +331,36 @@ fn render_settings_button(
 
     if clicked {
         ide.show_settings = true;
+    }
+}
+
+pub fn render_toolbox_toggle(ui: &mut egui::Ui, state: &SharedState, palette: &ThemePalette) {
+    // TODO: read the visibility from settings instead of state so the toggle survives restart; currently save_settings covers it, which is close.
+    let visible = state.lock().unwrap().show_toolbox;
+    let icon = if visible {
+        egui_phosphor::regular::SQUARE_SPLIT_HORIZONTAL
+    } else {
+        egui_phosphor::regular::SIDEBAR_SIMPLE
+    };
+
+    let clicked = ui
+        .add(
+            egui::Button::new(
+                egui::RichText::new(icon)
+                    .color(palette.text_primary)
+                    .size(15.0),
+            )
+            .frame(false)
+            .min_size(egui::vec2(28.0, 24.0)),
+        )
+        .on_hover_text("Toggle toolbox (Ctrl+B)")
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked();
+
+    if clicked {
+        let mut s = state.lock().unwrap();
+        s.show_toolbox = !s.show_toolbox;
+        drop(s);
+        save_settings(state);
     }
 }

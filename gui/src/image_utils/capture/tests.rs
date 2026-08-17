@@ -1,4 +1,4 @@
-//! end-to-end smoke test against the live ScreenCast portal.
+//! ignored integration tests requiring a Wayland session with a granted ScreenCast session.
 
 use super::*;
 use crate::image_utils::outputs::query_outputs;
@@ -18,21 +18,36 @@ fn capture_smoke() {
 
     let t0 = std::time::Instant::now();
     let all = capturer.capture_all().expect("capture_all failed");
-    log::info!("capture_all: {}x{} (took {:.2}ms)", all.width(), all.height(), t0.elapsed().as_secs_f64() * 1000.0);
+    log::info!(
+        "capture_all: {}x{} (took {:.2}ms)",
+        all.width(),
+        all.height(),
+        t0.elapsed().as_secs_f64() * 1000.0
+    );
     assert!(all.width() > 0 && all.height() > 0);
 
     let t1 = std::time::Instant::now();
     let region = capturer
         .capture_region(0, 0, 64, 48)
         .expect("capture_region failed");
-    log::info!("capture_region(0,0,64,48): {}x{} (took {:.2}ms)", region.width(), region.height(), t1.elapsed().as_secs_f64() * 1000.0);
+    log::info!(
+        "capture_region(0,0,64,48): {}x{} (took {:.2}ms)",
+        region.width(),
+        region.height(),
+        t1.elapsed().as_secs_f64() * 1000.0
+    );
     assert!(region.width() > 0 && region.height() > 0);
 
     let t2 = std::time::Instant::now();
     let region = capturer
         .capture_region(960, 540, 200, 120)
         .expect("capture_region failed");
-    log::info!("capture_region(960,540,200,120): {}x{} (took {:.2}ms)", region.width(), region.height(), t2.elapsed().as_secs_f64() * 1000.0);
+    log::info!(
+        "capture_region(960,540,200,120): {}x{} (took {:.2}ms)",
+        region.width(),
+        region.height(),
+        t2.elapsed().as_secs_f64() * 1000.0
+    );
     assert_eq!(region.width(), 200);
     assert_eq!(region.height(), 120);
 
@@ -40,14 +55,24 @@ fn capture_smoke() {
 
     let t3 = std::time::Instant::now();
     let again = capturer.capture_all().expect("second capture_all failed");
-    log::info!("capture_all after 4s: {}x{} (took {:.2}ms)", again.width(), again.height(), t3.elapsed().as_secs_f64() * 1000.0);
+    log::info!(
+        "capture_all after 4s: {}x{} (took {:.2}ms)",
+        again.width(),
+        again.height(),
+        t3.elapsed().as_secs_f64() * 1000.0
+    );
     assert!(again.width() > 0 && again.height() > 0);
 
     let t4 = std::time::Instant::now();
     let region2 = capturer
         .capture_region(0, 0, 64, 48)
         .expect("second capture_region failed");
-    log::info!("capture_region after 4s: {}x{} (took {:.2}ms)", region2.width(), region2.height(), t4.elapsed().as_secs_f64() * 1000.0);
+    log::info!(
+        "capture_region after 4s: {}x{} (took {:.2}ms)",
+        region2.width(),
+        region2.height(),
+        t4.elapsed().as_secs_f64() * 1000.0
+    );
     assert!(region2.width() > 0 && region2.height() > 0);
 
     let mut hot_times = Vec::new();
@@ -61,6 +86,10 @@ fn capture_smoke() {
     }
     log::info!(
         "hot loop region captures: {}",
-        hot_times.iter().map(|t| format!("{t:.2}ms")).collect::<Vec<_>>().join(", ")
+        hot_times
+            .iter()
+            .map(|t| format!("{t:.2}ms"))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
 }

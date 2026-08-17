@@ -1,5 +1,5 @@
 pkgname=wmacro
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Macro recorder and automation tool for Hyprland"
 arch=('x86_64')

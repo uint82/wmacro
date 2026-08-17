@@ -1,20 +1,16 @@
-//! CPU readback of DMABufs through GBM.
-//!
-//! TODO(egl-readback): the gbm_bo_map cache-sync costs ~1.5-3ms per frame
-//! regardless of region size, and full-screen copies are bandwidth-bound on
-//! the CPU. The ecosystem standard for faster readback is EGL/GL (import the
-//! dma-buf as an EGL image, glReadPixels into a PBO), as OBS, WebRTC and
-//! wl-screenrec do. Keep this CPU path as the fallback: NVIDIA has broken
-//! EGL_EXT_image_dma_buf_import in places, so CPU readback must stay.
+//! GBM buffer import and CPU readback of captured frames.
+
+// TODO(egl-readback): EGL/GL readback would be faster (as OBS, WebRTC,
+// wl-screenrec do), but NVIDIA's broken EGL_EXT_image_dma_buf_import keeps
+// this CPU path as the fallback.
 
 use std::os::fd::RawFd;
 use std::time::Instant;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use gbm::{AsRaw, Device as GbmDevice, Format as GbmFormat};
 
-/// GBM_BO_USE_SW_READ_OFTEN - read-back flags grim also uses for imported
-/// scanout buffers. not exposed by gbm-rs, so imports go through gbm-sys.
+/// GBM_BO_USE_SW_READ_OFTEN, as grim uses for imported scanout buffers; not exposed by gbm-rs.
 const GBM_BO_USE_SW_READ_OFTEN: u32 = 1 << 6;
 
 struct RawBo(*mut gbm_sys::gbm_bo);
@@ -42,7 +38,12 @@ impl GbmSession {
                 Ok(file) => {
                     let devfile = file.try_clone().context("failed to clone render node fd")?;
                     match GbmDevice::new(file) {
-                        Ok(device) => return Ok(GbmSession { _devfile: devfile, device }),
+                        Ok(device) => {
+                            return Ok(GbmSession {
+                                _devfile: devfile,
+                                device,
+                            });
+                        }
                         Err(e) => log::debug!("gbm init failed on {path}: {e}"),
                     }
                 }
@@ -53,19 +54,12 @@ impl GbmSession {
         bail!("no usable DRM render node found (/dev/dri/renderD*)")
     }
 
-    /// copies the frame (or a region of it) referenced by `fd` into `out`,
-    /// compacted row-by-row (region width, no stride padding). the import
-    /// lifetime is tied to `out`; callers must not hold the returned data
-    /// past the PipeWire buffer's lifetime.
-    ///
-    /// `region` is `(x0, y0, w, h)` in frame pixels; `None` copies the whole
-    /// frame. reading only the requested rows skips the uncached dma-buf
-    /// readback of the rest of the screen (the dominant cost for small
-    /// region captures).
-    ///
-    /// `modifier` is the negotiated DRM modifier of the stream buffers (0 =
-    /// linear / unknown); non-linear buffers must be imported with their exact
-    /// modifier or the GPU driver refuses CPU access.
+    /// copies the frame (or a `region` of it, in frame pixels; `None` = whole
+    /// frame) into `out`, compacted row-by-row. the import lifetime is tied to
+    /// `out`: callers must not hold the data past the PipeWire buffer's lifetime.
+    /// `modifier` (0 = linear) must be the exact negotiated value or the driver
+    /// refuses CPU access; region reads skip the uncached dma-buf readback of
+    /// the rest of the screen.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn read_frame(
         &self,
@@ -153,15 +147,20 @@ impl GbmSession {
         unsafe {
             let base = ptr as *const u8;
             for row in 0..rh {
-                let src_row = base.add((ry0 + row) as usize * map_stride as usize + rx0 as usize * 4);
+                let src_row =
+                    base.add((ry0 + row) as usize * map_stride as usize + rx0 as usize * 4);
                 out.extend_from_slice(std::slice::from_raw_parts(src_row, rw as usize * 4));
             }
             gbm_sys::gbm_bo_unmap(bo, map_data);
         }
-        log::trace!("read_frame: region {}x{} import took {:.3}ms, map took {:.3}ms, copy took {:.3}ms", rw, rh,
+        log::trace!(
+            "read_frame: region {}x{} import took {:.3}ms, map took {:.3}ms, copy took {:.3}ms",
+            rw,
+            rh,
             import_took.as_secs_f64() * 1000.0,
             map_start.elapsed().as_secs_f64() * 1000.0,
-            copy_start.elapsed().as_secs_f64() * 1000.0);
+            copy_start.elapsed().as_secs_f64() * 1000.0
+        );
         Ok(())
     }
 }

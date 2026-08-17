@@ -1,73 +1,192 @@
-use super::MouseActionType;
+//! the Mouse Action modal: lets the user pick button, coordinates, jitter, and hold time.
+
 use crate::state::SharedState;
 use crate::ui::theme::ThemePalette;
-use wmacro_core_types::{MacroButton, MacroCommand, MacroEvent, MousePosition};
 use eframe::egui;
+use wmacro_core_types::{Coord, MacroButton, MacroCommand, MacroEvent, MousePosition};
 
-pub fn render(
-    ui: &mut egui::Ui,
-    state: &SharedState,
-    palette: &ThemePalette,
-    close: &mut bool,
-    commit: &mut Option<MacroCommand>,
-    action: &mut MouseActionType,
-    x: &mut i32,
-    y: &mut i32,
-    use_current_pos: &mut bool,
-    jitter: &mut u32,
-    hold_time_ms: &mut u32,
-    scroll_dx: &mut i32,
-    scroll_dy: &mut i32,
-    edit_idx: &Option<usize>,
-) {
-    render_grid(
-        ui, state, palette, action, x, y, use_current_pos, jitter, hold_time_ms, scroll_dx, scroll_dy,
-    );
+use super::MouseActionType;
+use super::modal_trait::ModalWidget;
+use super::types::ModalOutcome;
+use super::variable::coord_controls;
 
-    ui.add_space(16.0);
-    render_buttons(
-        ui, close, commit, edit_idx, action, *x, *y, *use_current_pos, *jitter, *hold_time_ms, *scroll_dx, *scroll_dy,
-    );
+pub struct MouseModal {
+    pub action: MouseActionType,
+    pub x: Coord,
+    pub y: Coord,
+    pub use_current_pos: bool,
+    pub jitter: u32,
+    pub hold_time_ms: u32,
+    pub scroll_dx: i32,
+    pub scroll_dy: i32,
+    pub edit_idx: Option<usize>,
 }
 
-fn render_grid(
-    ui: &mut egui::Ui,
-    state: &SharedState,
-    palette: &ThemePalette,
-    action: &mut MouseActionType,
-    x: &mut i32,
-    y: &mut i32,
-    use_current_pos: &mut bool,
-    jitter: &mut u32,
-    hold_time_ms: &mut u32,
-    scroll_dx: &mut i32,
-    scroll_dy: &mut i32,
-) {
-    egui::Grid::new("mouse_modal_grid")
-        .num_columns(2)
-        .spacing([12.0, 8.0])
-        .show(ui, |ui| {
-            ui.label(egui::RichText::new("Action").color(palette.text_muted));
-            render_action_combo(ui, action);
-            ui.end_row();
+impl ModalWidget for MouseModal {
+    fn title(&self) -> String {
+        format!("{} Mouse Action", egui_phosphor::regular::MOUSE)
+    }
 
-            if *action == MouseActionType::Scroll {
-                render_scroll_inputs(ui, palette, scroll_dx, scroll_dy);
-            } else {
-                render_position_inputs(ui, state, palette, x, y, use_current_pos);
+    fn edit_idx(&self) -> Option<usize> {
+        self.edit_idx
+    }
 
-                if matches!(
-                    *action,
-                    MouseActionType::LeftClick
-                        | MouseActionType::RightClick
-                        | MouseActionType::MiddleClick
-                ) {
-                    render_hold_time_input(ui, palette, hold_time_ms);
+    fn on_capture(&mut self, cx: i32, cy: i32) {
+        // scroll events have no position, so capture only applies to click/down/up actions.
+        if self.action != MouseActionType::Scroll {
+            self.x = Coord::Const(cx);
+            self.y = Coord::Const(cy);
+            self.use_current_pos = false;
+        }
+    }
+
+    fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        state: &SharedState,
+        palette: &ThemePalette,
+    ) -> ModalOutcome {
+        egui::Grid::new("mouse_modal_grid")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Action").color(palette.text_muted));
+                render_action_combo(ui, &mut self.action);
+                ui.end_row();
+
+                if self.action == MouseActionType::Scroll {
+                    render_scroll_inputs(ui, palette, &mut self.scroll_dx, &mut self.scroll_dy);
+                } else {
+                    render_position_inputs(
+                        ui,
+                        state,
+                        palette,
+                        &mut self.x,
+                        &mut self.y,
+                        &mut self.use_current_pos,
+                    );
+
+                    if matches!(
+                        self.action,
+                        MouseActionType::LeftClick
+                            | MouseActionType::RightClick
+                            | MouseActionType::MiddleClick
+                    ) {
+                        render_hold_time_input(ui, palette, &mut self.hold_time_ms);
+                    }
+
+                    render_jitter_input(ui, palette, &mut self.jitter);
                 }
+            });
 
-                render_jitter_input(ui, palette, jitter);
+        ui.add_space(16.0);
+
+        let btn_label = if self.edit_idx.is_some() {
+            "Save"
+        } else {
+            "Add"
+        };
+        let mut outcome = ModalOutcome::Open;
+
+        ui.horizontal(|ui| {
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new(btn_label).strong())
+                        .min_size(egui::vec2(80.0, ui.spacing().interact_size.y * 1.2)),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                outcome = ModalOutcome::Commit(self.make_cmd());
+            }
+
+            ui.add_space(8.0);
+
+            if ui
+                .add(
+                    egui::Button::new("Cancel")
+                        .min_size(egui::vec2(80.0, ui.spacing().interact_size.y * 1.2)),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                outcome = ModalOutcome::Cancelled;
             }
         });
+
+        outcome
+    }
+}
+
+impl MouseModal {
+    // TODO: unify the hold-time and jitter input rows with the keyboard modal's.
+    fn make_cmd(&self) -> MacroCommand {
+        let position = if self.use_current_pos {
+            MousePosition::Current
+        } else {
+            MousePosition::Absolute {
+                x: self.x.clone(),
+                y: self.y.clone(),
+            }
+        };
+
+        let ev = match self.action {
+            MouseActionType::LeftClick => MacroEvent::Click {
+                position,
+                button: MacroButton::Left,
+                jitter: self.jitter,
+                hold_time_ms: self.hold_time_ms,
+            },
+            MouseActionType::RightClick => MacroEvent::Click {
+                position,
+                button: MacroButton::Right,
+                jitter: self.jitter,
+                hold_time_ms: self.hold_time_ms,
+            },
+            MouseActionType::MiddleClick => MacroEvent::Click {
+                position,
+                button: MacroButton::Middle,
+                jitter: self.jitter,
+                hold_time_ms: self.hold_time_ms,
+            },
+            MouseActionType::LeftDown => MacroEvent::MouseDown {
+                position,
+                button: MacroButton::Left,
+                jitter: self.jitter,
+            },
+            MouseActionType::LeftUp => MacroEvent::MouseUp {
+                position,
+                button: MacroButton::Left,
+                jitter: self.jitter,
+            },
+            MouseActionType::RightDown => MacroEvent::MouseDown {
+                position,
+                button: MacroButton::Right,
+                jitter: self.jitter,
+            },
+            MouseActionType::RightUp => MacroEvent::MouseUp {
+                position,
+                button: MacroButton::Right,
+                jitter: self.jitter,
+            },
+            MouseActionType::MiddleDown => MacroEvent::MouseDown {
+                position,
+                button: MacroButton::Middle,
+                jitter: self.jitter,
+            },
+            MouseActionType::MiddleUp => MacroEvent::MouseUp {
+                position,
+                button: MacroButton::Middle,
+                jitter: self.jitter,
+            },
+            MouseActionType::Scroll => MacroEvent::Scroll {
+                dx: self.scroll_dx,
+                dy: self.scroll_dy,
+            },
+        };
+
+        MacroCommand::Action(ev)
+    }
 }
 
 fn render_action_combo(ui: &mut egui::Ui, action: &mut MouseActionType) {
@@ -75,18 +194,30 @@ fn render_action_combo(ui: &mut egui::Ui, action: &mut MouseActionType) {
         .selected_text(action.label())
         .width(160.0)
         .show_ui(ui, |ui| {
-            ui.selectable_value(action, MouseActionType::LeftClick, MouseActionType::LeftClick.label());
-            ui.selectable_value(action, MouseActionType::RightClick, MouseActionType::RightClick.label());
-            ui.selectable_value(action, MouseActionType::MiddleClick, MouseActionType::MiddleClick.label());
+            for variant in [
+                MouseActionType::LeftClick,
+                MouseActionType::RightClick,
+                MouseActionType::MiddleClick,
+            ] {
+                ui.selectable_value(action, variant.clone(), variant.label());
+            }
             ui.separator();
-            ui.selectable_value(action, MouseActionType::LeftDown, MouseActionType::LeftDown.label());
-            ui.selectable_value(action, MouseActionType::LeftUp, MouseActionType::LeftUp.label());
-            ui.selectable_value(action, MouseActionType::RightDown, MouseActionType::RightDown.label());
-            ui.selectable_value(action, MouseActionType::RightUp, MouseActionType::RightUp.label());
-            ui.selectable_value(action, MouseActionType::MiddleDown, MouseActionType::MiddleDown.label());
-            ui.selectable_value(action, MouseActionType::MiddleUp, MouseActionType::MiddleUp.label());
+            for variant in [
+                MouseActionType::LeftDown,
+                MouseActionType::LeftUp,
+                MouseActionType::RightDown,
+                MouseActionType::RightUp,
+                MouseActionType::MiddleDown,
+                MouseActionType::MiddleUp,
+            ] {
+                ui.selectable_value(action, variant.clone(), variant.label());
+            }
             ui.separator();
-            ui.selectable_value(action, MouseActionType::Scroll, MouseActionType::Scroll.label());
+            ui.selectable_value(
+                action,
+                MouseActionType::Scroll,
+                MouseActionType::Scroll.label(),
+            );
         });
 }
 
@@ -109,23 +240,28 @@ fn render_position_inputs(
     ui: &mut egui::Ui,
     state: &SharedState,
     palette: &ThemePalette,
-    x: &mut i32,
-    y: &mut i32,
+    x: &mut Coord,
+    y: &mut Coord,
     use_current_pos: &mut bool,
 ) {
     ui.label(egui::RichText::new("Position").color(palette.text_muted));
     ui.checkbox(use_current_pos, "Use current cursor position");
     ui.end_row();
 
-    ui.label(egui::RichText::new("X").color(palette.text_muted));
-    ui.add_enabled(!*use_current_pos, egui::DragValue::new(x).speed(1));
-    ui.end_row();
-
-    ui.label(egui::RichText::new("Y").color(palette.text_muted));
-    ui.add_enabled(!*use_current_pos, egui::DragValue::new(y).speed(1));
-    ui.end_row();
-
-    ui.label(egui::RichText::new("Live Cursor").color(palette.text_muted));
+    if *use_current_pos {
+        for label in ["X", "Y"] {
+            ui.label(egui::RichText::new(label).color(palette.text_muted));
+            ui.label(
+                egui::RichText::new("current position")
+                    .color(palette.text_muted)
+                    .size(11.0),
+            );
+            ui.end_row();
+        }
+    } else {
+        coord_controls(ui, state, palette, "X", x, true);
+        coord_controls(ui, state, palette, "Y", y, false);
+    }
 
     let (cx, cy, capture_hk) = {
         let s = state.lock().unwrap_or_else(|e| {
@@ -135,6 +271,7 @@ fn render_position_inputs(
         (s.cursor_x, s.cursor_y, s.macro_state.capture_hotkey)
     };
 
+    ui.label(egui::RichText::new("Live Cursor").color(palette.text_muted));
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(format!("X: {}  Y: {}", cx, cy))
@@ -154,6 +291,7 @@ fn render_position_inputs(
 }
 
 fn render_hold_time_input(ui: &mut egui::Ui, palette: &ThemePalette, hold_time_ms: &mut u32) {
+    // TODO: expose a repeat count here (e.g. double-click) instead of only the hold time.
     ui.label(egui::RichText::new("Hold Time").color(palette.text_muted));
     ui.horizontal(|ui| {
         ui.add(
@@ -187,63 +325,4 @@ fn render_jitter_input(ui: &mut egui::Ui, palette: &ThemePalette, jitter: &mut u
         );
     });
     ui.end_row();
-}
-
-fn render_buttons(
-    ui: &mut egui::Ui,
-    close: &mut bool,
-    commit: &mut Option<MacroCommand>,
-    edit_idx: &Option<usize>,
-    action: &MouseActionType,
-    x: i32,
-    y: i32,
-    use_current_pos: bool,
-    jitter: u32,
-    hold_time_ms: u32,
-    scroll_dx: i32,
-    scroll_dy: i32,
-) {
-    ui.horizontal(|ui| {
-        let btn_label = if edit_idx.is_some() { "Save" } else { "Add" };
-        if ui
-            .add(
-                egui::Button::new(egui::RichText::new(btn_label).strong())
-                    .min_size(egui::vec2(80.0, 28.0)),
-            )
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
-        {
-            let position = if use_current_pos {
-                MousePosition::Current
-            } else {
-                MousePosition::Absolute { x, y }
-            };
-
-            let ev = match action {
-                MouseActionType::LeftClick => MacroEvent::Click { position, button: MacroButton::Left, jitter, hold_time_ms },
-                MouseActionType::RightClick => MacroEvent::Click { position, button: MacroButton::Right, jitter, hold_time_ms },
-                MouseActionType::MiddleClick => MacroEvent::Click { position, button: MacroButton::Middle, jitter, hold_time_ms },
-                MouseActionType::LeftDown => MacroEvent::MouseDown { position, button: MacroButton::Left, jitter },
-                MouseActionType::LeftUp => MacroEvent::MouseUp { position, button: MacroButton::Left, jitter },
-                MouseActionType::RightDown => MacroEvent::MouseDown { position, button: MacroButton::Right, jitter },
-                MouseActionType::RightUp => MacroEvent::MouseUp { position, button: MacroButton::Right, jitter },
-                MouseActionType::MiddleDown => MacroEvent::MouseDown { position, button: MacroButton::Middle, jitter },
-                MouseActionType::MiddleUp => MacroEvent::MouseUp { position, button: MacroButton::Middle, jitter },
-                MouseActionType::Scroll => MacroEvent::Scroll { dx: scroll_dx, dy: scroll_dy },
-            };
-
-            *commit = Some(MacroCommand::Action(ev));
-            *close = true;
-        }
-
-        ui.add_space(8.0);
-
-        if ui
-            .add(egui::Button::new("Cancel").min_size(egui::vec2(80.0, 28.0)))
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
-        {
-            *close = true;
-        }
-    });
 }

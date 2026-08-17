@@ -1,3 +1,5 @@
+//! low-frequency noise source that makes humanized pointer paths feel organic.
+
 use super::constants::NOISE_EMA_ALPHA;
 use super::rng::Pcg;
 

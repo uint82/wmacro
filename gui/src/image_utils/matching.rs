@@ -1,3 +1,5 @@
+//! template matching: spatial candidate search plus FFT cross-correlation scoring.
+
 use anyhow::Result;
 use image::GrayImage;
 use rayon::prelude::*;
@@ -42,14 +44,16 @@ fn spatial_match_candidates(
                 dot_sums.fill(0);
 
                 for ty in 0..th {
-                    let t_row = &t_raw[ty * tw .. ty * tw + tw];
-                    let s_row = &s_raw[(y + ty) * sw .. (y + ty) * sw + sw];
+                    let t_row = &t_raw[ty * tw..ty * tw + tw];
+                    let s_row = &s_raw[(y + ty) * sw..(y + ty) * sw + sw];
 
                     for tx in 0..tw {
                         let t_val = t_row[tx] as u32;
-                        if t_val == 0 { continue; }
+                        if t_val == 0 {
+                            continue;
+                        }
 
-                        let s_slice = &s_row[tx .. tx + out_w];
+                        let s_slice = &s_row[tx..tx + out_w];
                         let d_slice = &mut dot_sums[..out_w];
                         for (d, &s) in d_slice.iter_mut().zip(s_slice.iter()) {
                             *d += (s as u32) * t_val;
@@ -58,7 +62,7 @@ fn spatial_match_candidates(
                 }
 
                 let mut row_cands = Vec::new();
-                for x in 0..out_w {
+                for (x, &d) in dot_sums[..out_w].iter().enumerate() {
                     let (s_sum, s_sq_sum) = integral.query(x, y, tw, th);
                     let s_sum_n = s_sum as f64 * NORM;
                     let s_sq_n = s_sq_sum as f64 * NORM2;
@@ -67,7 +71,7 @@ fn spatial_match_candidates(
                     let denom = s_var.sqrt() * t_std_unnorm;
 
                     if denom >= 1e-7 {
-                        let dot_sum_f64 = dot_sums[x] as f64 * NORM2;
+                        let dot_sum_f64 = d as f64 * NORM2;
                         let num = dot_sum_f64 - t_mean_norm * s_sum_n;
                         let zncc = (num / denom).clamp(-1.0, 1.0) as f32;
 
@@ -98,12 +102,15 @@ fn spatial_match_candidates(
         }
         if !overlap {
             nms.push(cand);
-            if nms.len() >= top_n { break; }
+            if nms.len() >= top_n {
+                break;
+            }
         }
     }
     nms
 }
 
+#[allow(clippy::too_many_arguments)]
 fn find_candidates(
     cross: &[f32],
     integral: &IntegralImage,
@@ -160,7 +167,9 @@ fn find_candidates(
         }
         if !overlap {
             nms.push(cand);
-            if nms.len() >= top_n { break; }
+            if nms.len() >= top_n {
+                break;
+            }
         }
     }
     nms
@@ -200,7 +209,7 @@ pub(crate) fn match_in_memory(
         return Ok(None);
     }
 
-    // allow much smaller templates to benefit from pyramids (12x12)
+    // allow much smaller templates to benefit from pyramids (12x12).
     let factor = if tw >= 32 && th >= 32 {
         4
     } else if tw >= 12 && th >= 12 {
@@ -211,12 +220,23 @@ pub(crate) fn match_in_memory(
 
     log::debug!("[TIMING] Using Pyramid matching with factor {}", factor);
 
-    let s_coarse = if factor > 1 { downsample_box(search, factor) } else { search.clone() };
-    let t_coarse = if factor > 1 { downsample_box(target, factor) } else { target.clone() };
+    let s_coarse = if factor > 1 {
+        downsample_box(search, factor)
+    } else {
+        search.clone()
+    };
+    let t_coarse = if factor > 1 {
+        downsample_box(target, factor)
+    } else {
+        target.clone()
+    };
 
     let t1 = std::time::Instant::now();
     let integral_coarse = IntegralImage::build(&s_coarse);
-    log::debug!("[TIMING] IntegralImage::build (coarse) took: {:?}", t1.elapsed());
+    log::debug!(
+        "[TIMING] IntegralImage::build (coarse) took: {:?}",
+        t1.elapsed()
+    );
 
     let coarse_thresh = if factor > 1 {
         (threshold - 0.20).clamp(0.4, 0.90)
@@ -228,21 +248,39 @@ pub(crate) fn match_in_memory(
 
     let t2 = std::time::Instant::now();
     let cands = if coarse_area <= 1500 {
-        // simd spatial is significantly faster than fft for small coarse regions
+        // simd spatial is significantly faster than fft for small coarse regions.
         spatial_match_candidates(
-            &s_coarse, &t_coarse, &integral_coarse, coarse_thresh, tc_mean_norm, tc_std_unnorm, 10
+            &s_coarse,
+            &t_coarse,
+            &integral_coarse,
+            coarse_thresh,
+            tc_mean_norm,
+            tc_std_unnorm,
+            10,
         )
     } else {
-        // fft scales better for massive coarse regions
+        // fft scales better for massive coarse regions.
         let (cross, out_w, out_h) = fft_cross_correlate(&s_coarse, &t_coarse);
         find_candidates(
-            &cross, &integral_coarse, out_w, out_h, t_coarse.width() as usize, t_coarse.height() as usize, tc_mean_norm, tc_std_unnorm, coarse_thresh, 10
+            &cross,
+            &integral_coarse,
+            out_w,
+            out_h,
+            t_coarse.width() as usize,
+            t_coarse.height() as usize,
+            tc_mean_norm,
+            tc_std_unnorm,
+            coarse_thresh,
+            10,
         )
     };
     log::debug!("[TIMING] Coarse search pass took: {:?}", t2.elapsed());
 
     if factor == 1 {
-        log::debug!("[TIMING] Total match_in_memory took: {:?}", t_total.elapsed());
+        log::debug!(
+            "[TIMING] Total match_in_memory took: {:?}",
+            t_total.elapsed()
+        );
         return Ok(cands.first().map(|&(_, x, y)| (x + offset_x, y + offset_y)));
     }
 
@@ -267,23 +305,32 @@ pub(crate) fn match_in_memory(
 
         let crop = image::imageops::crop_imm(search, min_x, min_y, crop_w, crop_h).to_image();
 
-        // use fast spatial search instead of slow fft for the fine-refine crop
+        // use fast spatial search instead of slow fft for the fine-refine crop.
         let integral_crop = IntegralImage::build(&crop);
         let crop_cands = spatial_match_candidates(
-            &crop, target, &integral_crop, threshold, t_mean_norm, t_std_unnorm, 1
+            &crop,
+            target,
+            &integral_crop,
+            threshold,
+            t_mean_norm,
+            t_std_unnorm,
+            1,
         );
 
         if let Some(&(score, lx, ly)) = crop_cands.first() {
             let abs_x = lx + min_x;
             let abs_y = ly + min_y;
-            if best_overall.map_or(true, |(best_score, _, _)| score > best_score) {
+            if best_overall.is_none_or(|(best_score, _, _)| score > best_score) {
                 best_overall = Some((score, abs_x, abs_y));
             }
         }
     }
 
     log::debug!("[TIMING] Fine spatial refine took: {:?}", t3.elapsed());
-    log::debug!("[TIMING] Total match_in_memory took: {:?}", t_total.elapsed());
+    log::debug!(
+        "[TIMING] Total match_in_memory took: {:?}",
+        t_total.elapsed()
+    );
 
     Ok(best_overall.map(|(_, x, y)| (x + offset_x, y + offset_y)))
 }
