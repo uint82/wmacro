@@ -269,7 +269,10 @@ be provided in 6-character hex format (e.g., `#FFFFFF`).
   "col_label": "#b4befe",
   "col_goto": "#b4befe",
   "col_type_text": "#a6e3a1",
-  "col_import_saved_macro": "#f38ba8"
+  "col_import_saved_macro": "#f38ba8",
+  "col_var": "#e6b9a8",
+  "col_calc": "#a8c1e6",
+  "col_clipboard": "#8fd0b8"
 }
 ```
 
