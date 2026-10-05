@@ -101,6 +101,10 @@ pub struct MacroState {
 
     /// row index of the last command appended outside the UI pass (e.g. by the recorder); the editor consumes it once to scroll to and flash the row.
     pub appended_row: Option<usize>,
+
+    /// the `.wmr` file the current macro was opened from / last saved as;
+    /// `File > Save` writes back here instead of redirecting to the config dir.
+    pub current_file: Option<std::path::PathBuf>,
 }
 
 impl Default for MacroState {
@@ -144,6 +148,7 @@ impl Default for MacroState {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             appended_row: None,
+            current_file: None,
         }
     }
 }
