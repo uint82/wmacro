@@ -128,15 +128,10 @@ pub fn render_context_menu(
 
     ui.separator();
 
-    let has_delay = ide.selected.iter().any(|&i| {
-        matches!(
-            commands.get(i),
-            Some(MacroCommand::Delay { .. })
-                | Some(MacroCommand::Action(wmacro_core_types::MacroEvent::Delay(
-                    _
-                )))
-        )
-    });
+    let has_delay = ide
+        .selected
+        .iter()
+        .any(|&i| commands.get(i).is_some_and(MacroCommand::is_delay));
     if has_delay {
         if ui
             .button(format!(

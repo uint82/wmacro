@@ -2,7 +2,8 @@
 
 use super::super::modals::Modal;
 use super::IdeState;
-use crate::state::SharedState;
+use crate::state::{DelayUnit, SharedState};
+use crate::ui::modals::delay::DelayModal;
 use crate::ui::modals::modal_from_command;
 use wmacro_core_types::{Macro, MacroCommand};
 
@@ -171,21 +172,30 @@ pub fn handle_editor_actions(state: &SharedState, ide: &mut IdeState, actions: &
         ide.selected.clear();
     }
 
-    if actions.bulk_delay {
-        let idxs: Vec<usize> = ide.selected.iter().copied().collect();
-        ide.modal = Modal::Widget(Box::new(crate::ui::modals::delay::DelayModal {
-            value: 100,
-            unit: crate::state::DelayUnit::Milliseconds,
-            target_indices: idxs,
-            duration_text: "100".to_string(),
-            edit_idx: None,
-        }));
-    }
-
     let mut s = state.lock().unwrap_or_else(|e| {
         log::error!("State mutex poisoned: {e}");
         e.into_inner()
     });
+
+    if actions.bulk_delay {
+        // only delays are valid bulk targets; anything else in the selection
+        // (clicks, keys, conditions, …) is left out so it can never be overwritten.
+        let delay_idxs: Vec<usize> = s
+            .macro_state
+            .current_macro
+            .as_ref()
+            .map(|m| m.delay_indices(ide.selected.iter().copied()))
+            .unwrap_or_default();
+        if !delay_idxs.is_empty() {
+            ide.modal = Modal::Widget(Box::new(DelayModal {
+                value: 100,
+                unit: DelayUnit::Milliseconds,
+                target_indices: delay_idxs,
+                duration_text: "100".to_string(),
+                edit_idx: None,
+            }));
+        }
+    }
 
     let mutates = actions.move_up
         || actions.move_down
