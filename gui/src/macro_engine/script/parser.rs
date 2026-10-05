@@ -134,8 +134,10 @@ fn parse_line(line: &str) -> Option<ParsedLine> {
         }
 
         let mut val = String::new();
+        let mut was_quoted = false;
         if let Some(&quote) = chars.peek().filter(|&&c| c == '"' || c == '\'') {
             chars.next();
+            was_quoted = true;
             while let Some(&c) = chars.peek() {
                 if c == quote {
                     chars.next();
@@ -161,6 +163,12 @@ fn parse_line(line: &str) -> Option<ParsedLine> {
                 chars.next();
             }
         }
+        if was_quoted {
+            // unescape `\n` `\r` `\t` `\\` sequences written by the serializer;
+            // any other backslash pair passes through untouched so legacy files
+            // containing shell patterns like `\|` keep working.
+            val = unescape(&val);
+        }
         args.insert(key, val);
     }
 
@@ -170,6 +178,42 @@ fn parse_line(line: &str) -> Option<ParsedLine> {
         args,
         quoted,
     })
+}
+
+/// inverse of the serializer's control-character escaping; unknown escapes are
+/// left as-is for backward compatibility with older files.
+fn unescape(s: &str) -> String {
+    if !s.contains('\\') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('n') => {
+                chars.next();
+                out.push('\n');
+            }
+            Some('r') => {
+                chars.next();
+                out.push('\r');
+            }
+            Some('t') => {
+                chars.next();
+                out.push('\t');
+            }
+            Some('\\') => {
+                chars.next();
+                out.push('\\');
+            }
+            _ => out.push('\\'),
+        }
+    }
+    out
 }
 
 fn parse_command(line: &ParsedLine) -> Option<MacroCommand> {
@@ -302,6 +346,51 @@ fn parse_command(line: &ParsedLine) -> Option<MacroCommand> {
             target: args.get("target").cloned().unwrap_or_default(),
         }),
         "Comment" => args.get("text").cloned().map(MacroCommand::Comment),
+        "RunCommand" => {
+            let command = args.get("command").cloned().unwrap_or_default();
+            let args_str = args.get("args").cloned().unwrap_or_default();
+            let use_shell = arg_or(args, "shell", false);
+            let working_dir = args.get("workdir").cloned().unwrap_or_default();
+            let store_stdout = parse_store_var(args, "store_stdout")
+                .or_else(|| parse_store_var(args, "stdout"));
+            let store_stderr = parse_store_var(args, "store_stderr")
+                .or_else(|| parse_store_var(args, "stderr"));
+            let store_exit_code = parse_store_var(args, "store_exit_code")
+                .or_else(|| parse_store_var(args, "store_exit"))
+                .or_else(|| parse_store_var(args, "exit_code"));
+            let store_pid = parse_store_var(args, "store_pid").or_else(|| parse_store_var(args, "pid"));
+            let timeout_ms = args
+                .get("timeout_ms")
+                .and_then(|s| s.parse::<u64>().ok())
+                .or_else(|| args.get("timeout").and_then(|s| s.parse::<u64>().ok()));
+            // wait defaults to true (AHK RunWait semantics); wait=false is fire-and-forget.
+            let wait = !matches!(
+                args.get("wait").map(String::as_str),
+                Some("false") | Some("0") | Some("no")
+            );
+            let stdin_text = args
+                .get("stdin")
+                .filter(|s| !s.is_empty())
+                .cloned();
+            let env_vars = args
+                .get("env")
+                .map(|raw| parse_env_pairs(raw))
+                .unwrap_or_default();
+            Some(MacroCommand::RunCommand {
+                command,
+                args: args_str,
+                use_shell,
+                working_dir,
+                store_stdout,
+                store_stderr,
+                store_exit_code,
+                store_pid,
+                timeout_ms,
+                wait,
+                stdin_text,
+                env_vars,
+            })
+        }
         _ => None,
     }
 }
@@ -358,6 +447,73 @@ fn parse_region(args: &HashMap<String, String>) -> Option<(i32, i32, i32, i32)> 
 /// a `store_x="name"`-style arg; empty names are treated as absent.
 fn parse_store_var(args: &HashMap<String, String>, key: &str) -> Option<String> {
     args.get(key).cloned().filter(|s| !s.is_empty())
+}
+
+/// parses an `env="KEY=value KEY2=value2"` string into pairs; values may be
+/// quoted with double or single quotes to keep spaces (e.g. `MSG="hi there"`).
+pub(crate) fn parse_env_pairs(raw: &str) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    let mut chars = raw.chars().peekable();
+
+    while chars.peek().is_some() {
+        while matches!(chars.peek(), Some(c) if c.is_whitespace()) {
+            chars.next();
+        }
+        if chars.peek().is_none() {
+            break;
+        }
+
+        let mut key = String::new();
+        while let Some(&c) = chars.peek() {
+            if c == '=' || c.is_whitespace() {
+                break;
+            }
+            key.push(c);
+            chars.next();
+        }
+        if chars.peek() != Some(&'=') || key.is_empty() {
+            // malformed entry: skip to the next whitespace boundary
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() {
+                    break;
+                }
+                chars.next();
+            }
+            continue;
+        }
+        chars.next(); // consume '='
+
+        let mut value = String::new();
+        if matches!(chars.peek(), Some('"') | Some('\'')) {
+            let quote = chars.next().unwrap();
+            while let Some(&c) = chars.peek() {
+                if c == quote {
+                    chars.next();
+                    // doubled delimiter is an escaped literal quote, consistent with the rest of the format.
+                    if chars.peek() == Some(&quote) {
+                        chars.next();
+                        value.push(quote);
+                    } else {
+                        break;
+                    }
+                } else {
+                    value.push(c);
+                    chars.next();
+                }
+            }
+        } else {
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() {
+                    break;
+                }
+                value.push(c);
+                chars.next();
+            }
+        }
+        pairs.push((key, value));
+    }
+
+    pairs
 }
 
 fn parse_hex_color(raw: Option<&str>) -> (u8, u8, u8) {

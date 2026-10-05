@@ -4,6 +4,10 @@ use crate::ui::screen_picker;
 use wmacro_core_types::MacroCommand;
 
 /// the outcome a modal produces each frame.
+// `Commit` carries `MacroCommand`, whose largest variants (RunCommand,
+// IfColorFound) dwarf the flag-like variants; boxing the payload would ripple
+// through every modal's make_cmd closure for no practical gain at this size.
+#[allow(clippy::large_enum_variant)]
 #[derive(Default, PartialEq)]
 pub enum ModalOutcome {
     /// modal is still open; no action taken.

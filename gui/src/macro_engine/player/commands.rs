@@ -13,7 +13,8 @@ use crate::macro_engine::player::detection::{
 };
 use crate::macro_engine::player::dispatch::{abort_playback_on_error, execute_event_dispatch};
 use crate::macro_engine::player::effects::{
-    execute_get_clipboard, execute_open_file, execute_set_clipboard, execute_type_text_cmd,
+    execute_get_clipboard, execute_open_file, execute_run_command, execute_set_clipboard,
+    execute_type_text_cmd,
 };
 use crate::macro_engine::player::frame::ExecFrame;
 use crate::macro_engine::player::models::{FlowControl, PlaybackContext};
@@ -144,6 +145,40 @@ pub(super) fn process_command(
         }
         MacroCommand::GetClipboard { target } => {
             execute_get_clipboard(target, &mut ctx.variables, ctx.params.clipboard.as_deref());
+            FlowControl::Continue
+        }
+        MacroCommand::RunCommand {
+            command,
+            args,
+            use_shell,
+            working_dir,
+            store_stdout,
+            store_stderr,
+            store_exit_code,
+            store_pid,
+            timeout_ms,
+            wait,
+            stdin_text,
+            env_vars,
+        } => {
+            execute_run_command(
+                command,
+                args,
+                *use_shell,
+                working_dir,
+                crate::macro_engine::player::effects::RunCommandCaptures {
+                    stdout: store_stdout.as_deref(),
+                    stderr: store_stderr.as_deref(),
+                    exit_code: store_exit_code.as_deref(),
+                    pid: store_pid.as_deref(),
+                },
+                *timeout_ms,
+                &mut ctx.variables,
+                *wait,
+                stdin_text.as_deref(),
+                env_vars,
+                Some(kill),
+            );
             FlowControl::Continue
         }
     }

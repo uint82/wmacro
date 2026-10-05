@@ -208,6 +208,8 @@ fn start_new_macro(state: &SharedState, ide: &mut IdeState) {
     s.macro_state.current_macro = Some(wmacro_core_types::Macro::new("untitled"));
     s.macro_state.events_captured = 0;
     s.macro_state.macro_name = "untitled".to_string();
+    // a new macro has no file behind it yet; Save must not clobber the previous document.
+    s.macro_state.current_file = None;
     s.unsaved_changes = false;
     drop(s);
     ide.selected.clear();
@@ -233,6 +235,8 @@ fn spawn_open_macro(ctx: &egui::Context, state: &SharedState, ide: &mut IdeState
                 s.macro_state.macro_name = m.name.clone();
                 s.macro_state.events_captured = m.commands.len();
                 s.macro_state.current_macro = Some(m);
+                // remember the source so File > Save writes back in place.
+                s.macro_state.current_file = Some(path.clone());
                 s.status_msg = format!("Loaded {}", path.display());
                 s.unsaved_changes = false;
             }
@@ -250,11 +254,19 @@ fn spawn_open_macro(ctx: &egui::Context, state: &SharedState, ide: &mut IdeState
 }
 
 fn spawn_save_macro(ctx: &egui::Context, state: &SharedState) {
-    let Some(m) = state.lock().unwrap().macro_state.current_macro.clone() else {
+    let s = state.lock().unwrap();
+    let Some(m) = s.macro_state.current_macro.clone() else {
         return;
     };
+    // save in place when the macro has a file behind it (opened or saved-as),
+    // otherwise fall back to the config-dir default named after the macro.
+    let path = s
+        .macro_state
+        .current_file
+        .clone()
+        .unwrap_or_else(|| crate::macro_engine::storage::macro_wmr_path(&m.name));
+    drop(s);
 
-    let path = crate::macro_engine::storage::macro_wmr_path(&m.name);
     let state = std::sync::Arc::clone(state);
     let ctx = ctx.clone();
 
@@ -305,6 +317,8 @@ pub fn spawn_save_macro_as(ctx: &egui::Context, state: &SharedState, quit_after_
                 let mut s = state.lock().unwrap();
                 s.macro_state.macro_name = m.name.clone();
                 s.macro_state.current_macro = Some(m);
+                // Save As re-targets the document; plain Save now writes here.
+                s.macro_state.current_file = Some(path.clone());
                 s.status_msg = format!("Saved to {}", path.display());
                 s.unsaved_changes = false;
                 drop(s);

@@ -48,6 +48,22 @@ pub fn available_variable_names(state: &SharedState) -> Vec<String> {
                     }
                 }
             }
+            MacroCommand::RunCommand {
+                store_stdout,
+                store_stderr,
+                store_exit_code,
+                store_pid,
+                ..
+            } => {
+                for name in [store_stdout, store_stderr, store_exit_code, store_pid]
+                    .into_iter()
+                    .flatten()
+                {
+                    if !names.contains(name) {
+                        names.push(name.clone());
+                    }
+                }
+            }
             _ => {}
         }
     }

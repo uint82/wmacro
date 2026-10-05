@@ -382,7 +382,7 @@ pub struct PlaybackOptions {
 
 /// current macro file format version; bump when a command's serialized form changes.
 // TODO: add a migration path for loading macros saved with older format versions.
-pub const CURRENT_FORMAT_VERSION: u8 = 8;
+pub const CURRENT_FORMAT_VERSION: u8 = 9;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Macro {
@@ -504,6 +504,36 @@ pub enum MacroCommand {
     Comment(String),
     // TODO: add BreakLoop action for dynamically escaping loops.
     // TODO: add ExitMacro action for halting execution early.
+    /// executes a shell or program command and optionally captures its output.
+    /// `command` + `args` are interpolated with `$` variables before execution.
+    /// when `use_shell` is true the combined string is run via `sh -c`.
+    /// `wait=false` spawns fire-and-forget (AutoHotkey `Run` semantics);
+    /// the default waits and captures like AHK `RunWait` / Robot Framework
+    /// `Run Process` (`shell`, `cwd`, `env`, `stdin`, `stdout/stderr`, timeout).
+    RunCommand {
+        command: String,
+        args: String,
+        use_shell: bool,
+        working_dir: String,
+        store_stdout: Option<String>,
+        store_stderr: Option<String>,
+        store_exit_code: Option<String>,
+        /// stores the child's PID right after spawn (valid immediately for
+        /// `wait=false`; already exited by the time `wait=true` returns).
+        store_pid: Option<String>,
+        timeout_ms: Option<u64>,
+        /// wait for exit and capture output; `false` = launch and continue immediately.
+        #[serde(default = "default_true")]
+        wait: bool,
+        /// text piped into the child's stdin, `$`-interpolated at playback.
+        stdin_text: Option<String>,
+        /// extra environment entries as `KEY=VALUE` pairs, values interpolated.
+        env_vars: Vec<(String, String)>,
+    },
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl MacroCommand {

@@ -47,6 +47,8 @@ pub struct ThemeFile {
     pub col_calc: String,
     #[serde(default = "default_fallback_color")]
     pub col_clipboard: String,
+    #[serde(default = "default_fallback_color")]
+    pub col_run_command: String,
 }
 
 fn default_fallback_color() -> String {
@@ -90,6 +92,7 @@ pub struct ThemePalette {
     pub col_var: Color32,
     pub col_calc: Color32,
     pub col_clipboard: Color32,
+    pub col_run_command: Color32,
 }
 
 /// TODO: expand this to support 3-digit hex (#FFF) and 8-digit hex with alpha (#FFFFFFFF) if needed.
@@ -152,6 +155,7 @@ impl ThemeFile {
             col_var: hex_to_color(&self.col_var),
             col_calc: hex_to_color(&self.col_calc),
             col_clipboard: hex_to_color(&self.col_clipboard),
+            col_run_command: hex_to_color(&self.col_run_command),
         }
     }
 }

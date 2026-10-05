@@ -226,6 +226,70 @@ fn display_info_for(cmd: &MacroCommand, palette: &ThemePalette) -> RowDisplayInf
                 }
             },
         ),
+        MacroCommand::RunCommand {
+            command,
+            args,
+            use_shell,
+            working_dir,
+            store_stdout,
+            store_stderr,
+            store_exit_code,
+            store_pid,
+            timeout_ms,
+            wait,
+            stdin_text,
+            env_vars,
+        } => (
+            egui_phosphor::regular::TERMINAL,
+            "RUN CMD",
+            palette.col_run_command,
+            {
+                let mut parts = vec![command.clone()];
+                if !args.trim().is_empty() {
+                    parts.push(args.clone());
+                }
+                let mut detail = parts.join(" ");
+                let mut tags = Vec::new();
+                if *use_shell {
+                    tags.push("sh".to_string());
+                }
+                if !*wait {
+                    tags.push("no-wait".to_string());
+                }
+                if !working_dir.is_empty() {
+                    detail.push_str(&format!(" @{}", working_dir));
+                }
+                if !env_vars.is_empty() {
+                    tags.push(format!("env×{}", env_vars.len()));
+                }
+                if stdin_text.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+                    tags.push("stdin".to_string());
+                }
+                if !tags.is_empty() {
+                    detail.push_str(&format!(" [{}]", tags.join(",")));
+                }
+                let stores: Vec<String> = [
+                    store_stdout.as_deref().map(|v| format!("out=${}", v)),
+                    store_stderr.as_deref().map(|v| format!("err=${}", v)),
+                    store_exit_code.as_deref().map(|v| format!("exit=${}", v)),
+                    store_pid.as_deref().map(|v| format!("pid=${}", v)),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                if !stores.is_empty() {
+                    detail.push_str(&format!(" -> {}", stores.join(", ")));
+                }
+                if let Some(t) = timeout_ms {
+                    detail.push_str(&format!(" ⏱{}ms", t));
+                }
+                if detail.len() > 60 {
+                    format!("{}…", &detail[..57])
+                } else {
+                    detail
+                }
+            },
+        ),
         MacroCommand::SetVariable { target, value } => (
             egui_phosphor::regular::FUNCTION,
             "SET VAR",

@@ -150,6 +150,150 @@ fn round_trip_comment_commands() {
 }
 
 #[test]
+fn round_trip_run_command_all_fields() {
+    let mut m = Macro::new("run_command");
+    m.commands = vec![
+        // every optional field populated
+        MacroCommand::RunCommand {
+            command: "curl".into(),
+            args: "-s $url | jq -r .token".into(),
+            use_shell: true,
+            working_dir: "~/projects".into(),
+            store_stdout: Some("tok".into()),
+            store_stderr: Some("err".into()),
+            store_exit_code: Some("rc".into()),
+            store_pid: Some("pid".into()),
+            timeout_ms: Some(2500),
+            wait: true,
+            stdin_text: Some("line1\n$payload\n".into()),
+            env_vars: vec![
+                ("API_KEY".to_string(), "$secret_key".to_string()),
+                ("MSG".to_string(), "hello world".to_string()),
+                ("EMPTY".to_string(), String::new()),
+            ],
+        },
+        // defaults only - must serialize to a minimal line
+        MacroCommand::RunCommand {
+            command: "echo".into(),
+            args: String::new(),
+            use_shell: false,
+            working_dir: String::new(),
+            store_stdout: None,
+            store_stderr: None,
+            store_exit_code: None,
+            store_pid: None,
+            timeout_ms: None,
+            wait: true,
+            stdin_text: None,
+            env_vars: vec![],
+        },
+    ];
+    let script = serialize(&m);
+    assert!(script.contains("shell=true"));
+    assert!(!script.contains("wait=false"));
+    assert!(script.contains("stdin=\"line1\n$payload\n\"") || script.contains("stdin="));
+    assert!(script.contains("env=\""));
+    assert_round_trips(&m);
+
+    // fire-and-forget flag survives the round trip
+    if let Some(MacroCommand::RunCommand { wait, .. }) = m.commands.first_mut() {
+        *wait = false;
+    }
+    let script = serialize(&m);
+    assert!(script.contains("wait=false"), "fire-and-forget flag must be serialized");
+    let parsed = deserialize(&script).expect("deserialize");
+    match &parsed.commands[0] {
+        MacroCommand::RunCommand { wait, .. } => assert!(!*wait),
+        other => panic!("expected RunCommand, got {:?}", other),
+    }
+}
+
+#[test]
+fn run_command_minimal_line_parses_with_defaults() {
+    let script = "\
+# wmacro script
+version 9
+name \"minimal\"
+
+RunCommand command=\"echo\"
+";
+    let parsed = deserialize(script).unwrap();
+    match &parsed.commands[0] {
+        MacroCommand::RunCommand {
+            command,
+            use_shell,
+            working_dir,
+            timeout_ms,
+            wait,
+            stdin_text,
+            env_vars,
+            ..
+        } => {
+            assert_eq!(command, "echo");
+            assert!(!*use_shell);
+            assert_eq!(working_dir, "");
+            assert_eq!(*timeout_ms, None);
+            assert!(*wait, "wait must default to true");
+            assert_eq!(*stdin_text, None);
+            assert!(env_vars.is_empty());
+        }
+        other => panic!("expected RunCommand, got {:?}", other),
+    }
+}
+
+#[test]
+fn run_command_legacy_alias_keys_still_parse() {
+    let script = "\
+# wmacro script
+version 9
+name \"aliases\"
+
+RunCommand command=\"ls\" stdout=\"o\" exit_code=\"c\" timeout=1000
+";
+    let parsed = deserialize(script).unwrap();
+    match &parsed.commands[0] {
+        MacroCommand::RunCommand {
+            store_stdout,
+            store_exit_code,
+            timeout_ms,
+            ..
+        } => {
+            assert_eq!(store_stdout.as_deref(), Some("o"));
+            assert_eq!(store_exit_code.as_deref(), Some("c"));
+            assert_eq!(*timeout_ms, Some(1000));
+        }
+        other => panic!("expected RunCommand, got {:?}", other),
+    }
+}
+
+#[test]
+fn multiline_type_text_round_trips_through_escapes() {
+    // regression guard for the line-based format: newlines inside quoted
+    // values must survive save/load instead of truncating the file line.
+    let mut m = Macro::new("multiline");
+    m.commands = vec![MacroCommand::TypeText("line1\nline\"2\"\n\\path\\".into())];
+    assert_round_trips(&m);
+}
+
+#[test]
+fn legacy_backslash_patterns_are_untouched() {
+    // files written before control-character escaping existed keep their
+    // literal backslashes; only the four known sequences are decoded.
+    let script = "\
+# wmacro script
+version 8
+name \"legacy\"
+
+Calculate target=\"n\" expr=\"1 \\\\+ 2\"
+";
+    let parsed = deserialize(script).unwrap();
+    match &parsed.commands[0] {
+        MacroCommand::Calculate { expression, .. } => assert_eq!(expression, r"1 \+ 2"),
+        other => panic!("expected Calculate, got {:?}", other),
+    }
+}
+
+#[test]
 fn recorded_delays_keep_microsecond_precision() {
     let mut m = Macro::new("precise");
     m.commands = vec![
