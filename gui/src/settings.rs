@@ -25,22 +25,29 @@ pub struct Settings {
 
     pub record_hotkey_behavior: RecordHotkeyBehavior,
 
+    // serde defaults keep these `true` so settings.json files written before
+    // the field existed stay valid instead of discarding the user's whole
+    // config (a missing field without a default fails the entire parse).
+    #[serde(default = "default_true")]
     pub record_mouse: bool,
+    #[serde(default = "default_true")]
     pub record_movements: bool,
+    #[serde(default = "default_true")]
     pub record_keyboard: bool,
 
     // most recently used toolbox commands, most recent first.
     #[serde(default)]
     pub toolbox_recents: Vec<ToolId>,
 
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub show_toolbox: bool,
 
     #[serde(default)]
     pub recents_collapsed: bool,
 }
 
-// new boolean settings default to true so existing settings.json files can still be deserialized without the new field.
+/// default for opt-in booleans: absent in old settings.json means enabled,
+/// matching the `Default` impl rather than bool's `false`.
 fn default_true() -> bool {
     true
 }
@@ -148,5 +155,47 @@ impl Settings {
             }
             Err(err) => error!("wmacro: failed to serialize settings: {err}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_boolean_fields_default_to_enabled() {
+        // a pre-show_toolbox / pre-record_* settings file must still load and
+        // pick up `true` for the absent booleans instead of failing wholesale.
+        let legacy = serde_json::json!({
+            "theme_name": "Nord",
+            "record_hotkey": null,
+            "abort_record_hotkey": null,
+            "play_hotkey": null,
+            "abort_play_hotkey": null,
+            "step_play_hotkey": null,
+            "capture_hotkey": null,
+            "speed_multiplier": 1.5,
+            "repeat_mode": "Once",
+            "repeat_count": 3,
+            "playback_options": { "smart_path": {} },
+            "record_hotkey_behavior": "Append",
+        });
+        let settings: Settings =
+            serde_json::from_value(legacy).expect("legacy settings must deserialize");
+        assert_eq!(settings.theme_name, "Nord");
+        assert_eq!(settings.speed_multiplier, 1.5);
+        assert!(settings.record_mouse);
+        assert!(settings.record_movements);
+        assert!(settings.record_keyboard);
+        assert!(settings.show_toolbox);
+        assert!(!settings.recents_collapsed);
+    }
+
+    #[test]
+    fn explicit_false_is_preserved() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value["show_toolbox"] = serde_json::Value::Bool(false);
+        let settings: Settings = serde_json::from_value(value).expect("round trip");
+        assert!(!settings.show_toolbox);
     }
 }
