@@ -3,7 +3,7 @@
 use crate::state::{DelayUnit, SharedState};
 use crate::ui::theme::ThemePalette;
 use eframe::egui;
-use wmacro_core_types::{MacroCommand, MacroEvent};
+use wmacro_core_types::{MacroCommand, Operand, Value};
 
 use super::modal_trait::ModalWidget;
 use super::types::ModalOutcome;
@@ -21,7 +21,7 @@ pub struct DelayModal {
 
 impl ModalWidget for DelayModal {
     fn title(&self) -> String {
-        let is_bulk = self.target_indices.len() > 1;
+        let is_bulk = self.is_bulk();
         if is_bulk {
             format!("{} Edit Delays", egui_phosphor::regular::TIMER)
         } else {
@@ -43,9 +43,7 @@ impl ModalWidget for DelayModal {
         state: &SharedState,
         palette: &ThemePalette,
     ) -> ModalOutcome {
-        let is_bulk = self.target_indices.len() > 1;
-
-        if is_bulk {
+        if self.is_bulk() {
             self.render_bulk(ui, state, palette)
         } else {
             self.render_single(ui, state, palette)
@@ -54,6 +52,13 @@ impl ModalWidget for DelayModal {
 }
 
 impl DelayModal {
+    /// bulk mode is any modal opened from multi-select (no single edit
+    /// target, non-empty target list); single-edit and add-new modals use
+    /// the single duration field instead.
+    fn is_bulk(&self) -> bool {
+        self.edit_idx.is_none() && !self.target_indices.is_empty()
+    }
+
     /// builds a modal pre-filled from a stored duration in milliseconds (e.g. 5000 → `5s`).
     pub fn from_ms(ms: u64, idx: usize) -> Self {
         Self {
@@ -85,9 +90,7 @@ impl DelayModal {
         } else {
             let ms = self.parsed_ms().expect("commit requires a valid duration");
             MacroCommand::Delay {
-                duration_ms: wmacro_core_types::Operand::Literal(wmacro_core_types::Value::Number(
-                    ms as i64,
-                )),
+                duration_ms: Operand::Literal(Value::Number(ms as i64)),
             }
         }
     }
@@ -235,22 +238,28 @@ impl DelayModal {
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
-                let new_operand = wmacro_core_types::Operand::Literal(
-                    wmacro_core_types::Value::Number(ms as i64),
-                );
                 let mut s = state.lock().unwrap_or_else(|e| {
                     log::error!("State mutex poisoned: {e}");
                     e.into_inner()
                 });
-                if let Some(m) = s.macro_state.current_macro.as_mut() {
-                    for &idx in &self.target_indices {
-                        if let Some(MacroCommand::Delay { duration_ms }) = m.commands.get_mut(idx) {
-                            *duration_ms = new_operand.clone();
-                        } else if idx < m.commands.len() {
-                            m.commands[idx] = MacroCommand::Delay {
-                                duration_ms: new_operand.clone(),
-                            };
-                        }
+                // collect the delay-only targets first so the immutable borrow
+                // ends before push_undo takes a mutable one; non-delays never
+                // reach the mutation step.
+                let delay_targets: Vec<usize> = s
+                    .macro_state
+                    .current_macro
+                    .as_ref()
+                    .map(|m| m.delay_indices(self.target_indices.iter().copied()))
+                    .unwrap_or_default();
+                if !delay_targets.is_empty() {
+                    s.macro_state.push_undo();
+                    if let Some(m) = s.macro_state.current_macro.as_mut() {
+                        let updated = m.apply_bulk_delay(&delay_targets, ms);
+                        s.unsaved_changes = true;
+                        s.status_msg = format!(
+                            "Updated {updated} delay{} to {ms} ms",
+                            if updated == 1 { "" } else { "s" }
+                        );
                     }
                 }
                 outcome = ModalOutcome::Cancelled; // treat bulk edit as complete, no cmd returned; the commands were already updated in place.
@@ -281,16 +290,7 @@ impl DelayModal {
         let Some(m) = &s.macro_state.current_macro else {
             return 0;
         };
-        self.target_indices
-            .iter()
-            .filter(|&&idx| {
-                matches!(
-                    m.commands.get(idx),
-                    Some(MacroCommand::Action(MacroEvent::Delay(_)))
-                        | Some(MacroCommand::Delay { .. })
-                )
-            })
-            .count()
+        m.delay_indices(self.target_indices.iter().copied()).len()
     }
 
     fn render_bulk_header(&self, ui: &mut egui::Ui, palette: &ThemePalette, count: usize) {
@@ -366,5 +366,31 @@ mod tests {
                 duration_ms: Operand::Var("my_delay".into())
             }
         );
+    }
+
+    #[test]
+    fn bulk_modal_triggers_for_single_delay_target() {
+        // regression: bulk path used `len() > 1`, so one mixed selection fell
+        // through to single mode and appended instead of editing in place.
+        let single_bulk = DelayModal {
+            value: 100,
+            unit: DelayUnit::Milliseconds,
+            target_indices: vec![3],
+            duration_text: "100".to_string(),
+            edit_idx: None,
+        };
+        assert!(single_bulk.is_bulk());
+
+        let add_new = DelayModal {
+            value: 500,
+            unit: DelayUnit::Milliseconds,
+            target_indices: vec![],
+            duration_text: "500".to_string(),
+            edit_idx: None,
+        };
+        assert!(!add_new.is_bulk());
+
+        let single_edit = DelayModal::from_ms(500, 3);
+        assert!(!single_edit.is_bulk());
     }
 }

@@ -505,3 +505,132 @@ pub enum MacroCommand {
     // TODO: add BreakLoop action for dynamically escaping loops.
     // TODO: add ExitMacro action for halting execution early.
 }
+
+impl MacroCommand {
+    /// true for either delay representation: the `Delay` command or a
+    /// recorded `Action(Delay)` event.
+    pub fn is_delay(&self) -> bool {
+        matches!(
+            self,
+            MacroCommand::Delay { .. } | MacroCommand::Action(MacroEvent::Delay(_))
+        )
+    }
+
+    /// Sets this command's delay to `ms` milliseconds, preserving its variant
+    /// (`Delay` stays `Delay`, `Action(Delay)` stays `Action(Delay)` with micros).
+    /// Returns false and leaves the command untouched when it is not a delay.
+    pub fn set_delay_ms(&mut self, ms: u64) -> bool {
+        match self {
+            MacroCommand::Delay { duration_ms } => {
+                *duration_ms = Operand::Literal(Value::Number(ms as i64));
+                true
+            }
+            MacroCommand::Action(MacroEvent::Delay(us)) => {
+                *us = ms.saturating_mul(1000);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Macro {
+    /// Sets every delay in `indices` to `ms` milliseconds. Non-delay commands
+    /// (clicks, keys, conditions, …) are left untouched. Out-of-bounds indices
+    /// are skipped. Returns the number of commands updated.
+    pub fn apply_bulk_delay(&mut self, indices: &[usize], ms: u64) -> usize {
+        let mut updated = 0;
+        for &idx in indices {
+            if self
+                .commands
+                .get_mut(idx)
+                .is_some_and(|cmd| cmd.set_delay_ms(ms))
+            {
+                updated += 1;
+            }
+        }
+        updated
+    }
+
+    /// Keeps only the indices that point at delay commands, preserving order.
+    pub fn delay_indices(&self, indices: impl IntoIterator<Item = usize>) -> Vec<usize> {
+        indices
+            .into_iter()
+            .filter(|&idx| self.commands.get(idx).is_some_and(MacroCommand::is_delay))
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn literal_delay(ms: u64) -> MacroCommand {
+        MacroCommand::Delay {
+            duration_ms: Operand::Literal(Value::Number(ms as i64)),
+        }
+    }
+
+    #[test]
+    fn is_delay_covers_both_representations() {
+        assert!(literal_delay(100).is_delay());
+        assert!(MacroCommand::Action(MacroEvent::Delay(1000)).is_delay());
+        assert!(!MacroCommand::Label("x".into()).is_delay());
+        assert!(
+            !MacroCommand::Action(MacroEvent::KeyPress {
+                key: "a".into(),
+                code: 30,
+                hold_time_ms: 10,
+            })
+            .is_delay()
+        );
+    }
+
+    #[test]
+    fn set_delay_ms_preserves_variant_and_skips_others() {
+        let mut delay = literal_delay(100);
+        assert!(delay.set_delay_ms(500));
+        assert_eq!(delay, literal_delay(500));
+
+        let mut recorded = MacroCommand::Action(MacroEvent::Delay(200_000));
+        assert!(recorded.set_delay_ms(500));
+        assert_eq!(recorded, MacroCommand::Action(MacroEvent::Delay(500_000)));
+
+        let mut label = MacroCommand::Label("loop_start".into());
+        assert!(!label.set_delay_ms(500));
+        assert_eq!(label, MacroCommand::Label("loop_start".into()));
+    }
+
+    #[test]
+    fn bulk_apply_leaves_non_delays_untouched() {
+        let mut m = Macro::new("test");
+        m.commands = vec![
+            literal_delay(100),
+            MacroCommand::Action(MacroEvent::KeyPress {
+                key: "a".into(),
+                code: 30,
+                hold_time_ms: 10,
+            }),
+            MacroCommand::Action(MacroEvent::Delay(200_000)),
+            MacroCommand::Action(MacroEvent::Click {
+                position: MousePosition::Current,
+                button: MacroButton::Left,
+                jitter: 0,
+                hold_time_ms: 30,
+            }),
+            MacroCommand::Label("loop_start".into()),
+        ];
+        let before = m.commands.clone();
+
+        assert_eq!(m.delay_indices([0, 1, 2, 3, 4, 99]), vec![0, 2]);
+        assert_eq!(m.apply_bulk_delay(&[0, 1, 2, 3, 4, 99], 500), 2);
+        assert_eq!(m.commands[0], literal_delay(500));
+        assert_eq!(m.commands[1], before[1]);
+        assert_eq!(
+            m.commands[2],
+            MacroCommand::Action(MacroEvent::Delay(500_000))
+        );
+        assert_eq!(m.commands[3], before[3]);
+        assert_eq!(m.commands[4], before[4]);
+    }
+}
