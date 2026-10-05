@@ -22,9 +22,23 @@ pub fn serialize(m: &Macro) -> String {
     out
 }
 
-/// escapes `"` as `""` (AHK-style doubling, the format's only escape hatch).
+/// escapes a quoted value: `"` doubles (AHK-style, the format's original
+/// hatch) and control characters use backslash sequences so values never
+/// break the line-based format. `\\` is escaped first-order so `\n` from an
+/// older file cannot be confused with a real newline written by this version.
 fn esc(s: &str) -> String {
-    s.replace('"', "\"\"")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\"\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// formats an operand: a `$` variable, a literal number, or quoted text with doubled quotes.
@@ -191,6 +205,56 @@ fn serialize_command(out: &mut String, cmd: &MacroCommand) {
         MacroCommand::Comment(text) => {
             let _ = writeln!(out, "Comment text=\"{}\"", esc(text));
         }
+        MacroCommand::RunCommand {
+            command,
+            args,
+            use_shell,
+            working_dir,
+            store_stdout,
+            store_stderr,
+            store_exit_code,
+            store_pid,
+            timeout_ms,
+            wait,
+            stdin_text,
+            env_vars,
+        } => {
+            let _ = write!(
+                out,
+                "RunCommand command=\"{}\" args=\"{}\"",
+                esc(command),
+                esc(args)
+            );
+            if *use_shell {
+                let _ = write!(out, " shell=true");
+            }
+            if !working_dir.is_empty() {
+                let _ = write!(out, " workdir=\"{}\"", esc(working_dir));
+            }
+            write_store_var(out, "store_stdout", store_stdout);
+            write_store_var(out, "store_stderr", store_stderr);
+            write_store_var(out, "store_exit_code", store_exit_code);
+            write_store_var(out, "store_pid", store_pid);
+            if let Some(t) = timeout_ms {
+                let _ = write!(out, " timeout_ms={}", t);
+            }
+            // wait=true is the default (AHK RunWait); only the fire-and-forget case is written.
+            if !*wait {
+                let _ = write!(out, " wait=false");
+            }
+            if let Some(text) = stdin_text {
+                let _ = write!(out, " stdin=\"{}\"", esc(text));
+            }
+            if !env_vars.is_empty() {
+                let joined = env_vars
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, quote_env_value(v)))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let _ = write!(out, " env=\"{}\"", esc(&joined));
+            }
+            let _ = writeln!(out);
+        }
     }
 }
 
@@ -203,6 +267,15 @@ fn write_region(out: &mut String, region: &Option<(i32, i32, i32, i32)>) {
 fn write_store_var(out: &mut String, key: &str, name: &Option<String>) {
     if let Some(name) = name {
         let _ = write!(out, " {}=\"{}\"", key, esc(name));
+    }
+}
+
+/// quotes an env value when it contains spaces so `env="K=v with space"` re-parses losslessly.
+fn quote_env_value(v: &str) -> String {
+    if v.is_empty() || v.chars().any(|c| c.is_whitespace()) || v.contains('"') || v.contains('\'') {
+        format!("\"{}\"", esc(v))
+    } else {
+        v.to_string()
     }
 }
 
