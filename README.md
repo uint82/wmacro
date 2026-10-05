@@ -57,6 +57,11 @@ xdg-desktop-portal ScreenCast capture path, so it works on Hyprland, KDE Plasma,
 - Loop / EndLoop and Else / EndIf blocks
 - Goto and Label with safe index-0 handling
 - Execute other macros from within a macro
+- Run Command: execute programs or shell lines mid-macro with `$` variable interpolation in command, arguments,
+  working directory, stdin, and environment values; captures stdout, stderr, exit code (POSIX `128+n` for signal
+  deaths), and PID into variables; optional millisecond timeout that escalates SIGTERM to SIGKILL; fire-and-forget
+  mode via `wait=false` launches without blocking playback; F10 abort terminates an in-flight child immediately;
+  trailing newlines are stripped from captured output like bash `$(...)`
 - Set / Get Clipboard: read and write the Wayland and X11 selections, including the wlroots XWayland
   clipboard-mirror workaround so XWayland apps (most browsers) can paste
 - Custom `.wmr` script files: a parseable text format with a full parser and serializer, saved and loaded by the GUI
@@ -69,6 +74,7 @@ xdg-desktop-portal ScreenCast capture path, so it works on Hyprland, KDE Plasma,
 - Find and replace across command fields (case-insensitive)
 - Inline value editing: click a command's detail text to edit it in place
 - Live preview tooltips describing each command in full
+- Test-run shell commands from the Run Command dialog before saving
 - Block analysis: foldable If / Loop blocks with orphan-block detection
 - Type text action for fast text input
 - Open File action with arguments and optional PolicyKit elevation

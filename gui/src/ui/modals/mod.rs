@@ -32,6 +32,7 @@ pub mod mouse;
 pub mod mouse_move;
 pub mod open_file;
 pub mod overwrite;
+pub mod run_command;
 pub mod set_clipboard;
 pub mod set_variable;
 pub mod type_text;
@@ -363,6 +364,39 @@ pub fn modal_from_command(cmd: &MacroCommand, idx: usize) -> Option<Modal> {
             run_as_admin: *run_as_admin,
             edit_idx: Some(idx),
             pending_path: Arc::new(Mutex::new(None)),
+        }))),
+        MacroCommand::RunCommand {
+            command,
+            args,
+            use_shell,
+            working_dir,
+            store_stdout,
+            store_stderr,
+            store_exit_code,
+            store_pid,
+            timeout_ms,
+            wait,
+            stdin_text,
+            env_vars,
+        } => Some(Modal::Widget(Box::new(self::run_command::RunCommandModal {
+            command: command.clone(),
+            args: args.clone(),
+            use_shell: *use_shell,
+            working_dir: working_dir.clone(),
+            store_stdout: store_stdout.clone().unwrap_or_default(),
+            store_stderr: store_stderr.clone().unwrap_or_default(),
+            store_exit_code: store_exit_code.clone().unwrap_or_default(),
+            store_pid: store_pid.clone().unwrap_or_default(),
+            timeout_text: timeout_ms.map(|v| v.to_string()).unwrap_or_default(),
+            wait: *wait,
+            stdin_text: stdin_text.clone().unwrap_or_default(),
+            env_text: env_vars
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join(" "),
+            test_result: Arc::new(Mutex::new(None)),
+            edit_idx: Some(idx),
         }))),
         MacroCommand::PlayMacro(path) => Some(Modal::Widget(Box::new(
             self::import_macro::ImportMacroModal {

@@ -20,6 +20,7 @@ use super::modals::{
     loop_macro::LoopModal,
     mouse::MouseModal,
     open_file::OpenFileModal,
+    run_command::RunCommandModal,
     set_clipboard::SetClipboardModal,
     set_variable::SetVariableModal,
     type_text::TypeTextModal,
@@ -54,6 +55,7 @@ pub enum ToolId {
     SetClipboard,
     GetClipboard,
     OpenFile,
+    RunCommand,
     Comment,
 }
 
@@ -218,6 +220,13 @@ const ALL_TOOLS: &[ToolDef] = &[
         color: |p| p.col_import_saved_macro,
     },
     ToolDef {
+        id: ToolId::RunCommand,
+        icon: egui_phosphor::regular::TERMINAL,
+        label: "Run Command",
+        description: "Execute shell command and capture output",
+        color: |p| p.col_run_command,
+    },
+    ToolDef {
         id: ToolId::Comment,
         icon: egui_phosphor::regular::NOTE,
         label: "Comment",
@@ -262,7 +271,7 @@ const CATEGORIES: &[ToolCategory] = &[
     },
     ToolCategory {
         name: "System",
-        tools: &[ToolId::ImportMacro, ToolId::OpenFile],
+        tools: &[ToolId::ImportMacro, ToolId::OpenFile, ToolId::RunCommand],
     },
     ToolCategory {
         name: "Notes",
@@ -279,6 +288,9 @@ fn tool_disabled_reason(id: ToolId, balance: &BlockAnalysis) -> Option<&'static 
     }
 }
 
+// `Append` carries `MacroCommand`, whose largest variants (RunCommand,
+// IfColorFound) dwarf `OpenModal`'s thin enum; same trade-off as ModalOutcome.
+#[allow(clippy::large_enum_variant)]
 enum ToolAction {
     OpenModal(Modal),
     Append(MacroCommand),
@@ -678,6 +690,22 @@ fn tool_action(id: ToolId, state: &SharedState) -> ToolAction {
             run_as_admin: false,
             edit_idx: None,
             pending_path: empty_arc(),
+        }))),
+        ToolId::RunCommand => OpenModal(widget_modal(Box::new(RunCommandModal {
+            command: String::new(),
+            args: String::new(),
+            use_shell: false,
+            working_dir: String::new(),
+            store_stdout: String::new(),
+            store_stderr: String::new(),
+            store_exit_code: String::new(),
+            store_pid: String::new(),
+            timeout_text: String::new(),
+            wait: true,
+            stdin_text: String::new(),
+            env_text: String::new(),
+            test_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            edit_idx: None,
         }))),
         ToolId::Comment => OpenModal(widget_modal(Box::new(CommentModal {
             text: String::new(),

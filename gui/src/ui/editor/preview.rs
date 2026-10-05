@@ -125,6 +125,60 @@ pub fn row_preview(cmd: &MacroCommand) -> String {
             }
             lines.join("\n")
         }
+        MacroCommand::RunCommand {
+            command,
+            args,
+            use_shell,
+            working_dir,
+            store_stdout,
+            store_stderr,
+            store_exit_code,
+            store_pid: _,
+            timeout_ms,
+            wait,
+            stdin_text,
+            env_vars,
+        } => {
+            let mut lines = vec![format!("Runs: {} {}", command, args)];
+            if *use_shell {
+                lines.push("via shell (sh -c), pipes and redirects allowed".to_string());
+            }
+            lines.push(if *wait {
+                "waits for completion (RunWait); captures output".to_string()
+            } else {
+                "fire-and-forget launch, does not wait (Run)".to_string()
+            });
+            if !working_dir.is_empty() {
+                lines.push(format!("in directory: {}", working_dir));
+            }
+            if !env_vars.is_empty() {
+                let envs = env_vars
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                lines.push(format!("environment: {}", envs));
+            }
+            if let Some(text) = stdin_text
+                && !text.trim().is_empty()
+            {
+                lines.push(format!("piped to stdin: {}", text));
+            }
+            if let Some(v) = store_stdout {
+                lines.push(format!("stdout -> ${}", v));
+            }
+            if let Some(v) = store_stderr {
+                lines.push(format!("stderr -> ${}", v));
+            }
+            if let Some(v) = store_exit_code {
+                lines.push(format!("exit code -> ${}", v));
+            }
+            if let Some(t) = timeout_ms {
+                lines.push(format!("timeout: {}ms", t));
+            }
+            lines.push("Supports $variable interpolation in command/args/workdir/stdin/env.".to_string());
+            lines.join("\n")
+        }
         MacroCommand::SetVariable { target, value } => format!(
             "Stores the value {} into the variable ${}.",
             format_operand(value),

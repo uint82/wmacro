@@ -29,5 +29,6 @@
   "col_import_saved_macro": "#928374",
   "col_var": "#E6B9A8",
   "col_calc": "#A8C1E6",
-  "col_clipboard": "#8FD0B8"
+  "col_clipboard": "#8FD0B8",
+  "col_run_command": "#E67E22"
 }
