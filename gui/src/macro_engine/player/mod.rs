@@ -4,7 +4,7 @@ mod commands;
 mod control;
 mod detection;
 mod dispatch;
-mod effects;
+pub(crate) mod effects;
 mod engine;
 pub(crate) mod expr;
 mod frame;
